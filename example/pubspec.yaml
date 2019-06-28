@@ -6,6 +6,9 @@ environment:
   sdk: ">=2.1.0 <3.0.0"
 
 dependencies:
+  flutter_store_listing:
+    path: ../
+
   flutter:
     sdk: flutter
 
@@ -16,9 +19,6 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  flutter_store_listing:
-    path: ../
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

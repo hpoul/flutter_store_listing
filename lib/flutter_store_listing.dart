@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:logging/logging.dart';
 import 'package:package_info/package_info.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:url_launcher/url_launcher.dart' as defaultUrlLauncher;
 
 final _logger = Logger('flutter_store_listing');
 
@@ -16,6 +16,10 @@ class FlutterStoreListing {
 
   String forceIosAppId;
   String forceAndroidPackageName;
+
+  Future<bool> Function(String url) urlCanLaunch = (url) async => await defaultUrlLauncher.canLaunch(url);
+  Future<bool> Function(String url) urlLauncher =
+      (url) async => await defaultUrlLauncher.launch(url, forceSafariVC: false);
 
   static const MethodChannel _channel = MethodChannel('flutter_store_listing');
 
@@ -37,16 +41,17 @@ class FlutterStoreListing {
     }
   }
 
-  Future<bool> launchStoreListing() async {
+  Future<bool> launchStoreListing({bool requestReview}) async {
     if (Platform.isIOS) {
       final String _appID = await getIosAppId;
-      return await launch(getIosStoreListing(_appID), forceSafariVC: false);
+      final String urlPostfix = requestReview ? '?mt=8&action=write-review' : '';
+      return await urlLauncher('${getIosStoreListing(_appID)}$urlPostfix');
     } else {
       final String _appID = await _getPackageName();
-      if (await canLaunch('market://')) {
-        return await launch('market://details?id=$_appID', forceSafariVC: false);
+      if (await urlCanLaunch('market://')) {
+        return await urlLauncher('market://details?id=$_appID');
       } else {
-        return await launch(getAndroidStoreListing(_appID), forceSafariVC: false);
+        return await urlLauncher(getAndroidStoreListing(_appID));
       }
     }
   }
