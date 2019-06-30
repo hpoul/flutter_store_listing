@@ -33,7 +33,7 @@ class FlutterStoreListing {
   Future<bool> requestReview() async {
     if (Platform.isIOS) {
       if (!await _channel.invokeMethod<bool>('requestReview')) {
-        return await launchStoreListing();
+        return await launchStoreListing(requestReview: true);
       }
       return true;
     } else {
@@ -44,7 +44,8 @@ class FlutterStoreListing {
   Future<bool> launchStoreListing({bool requestReview}) async {
     if (Platform.isIOS) {
       final String _appID = await getIosAppId;
-      final String urlPostfix = requestReview ? '?mt=8&action=write-review' : '';
+      // https://developer.apple.com/documentation/storekit/skstorereviewcontroller/requesting_app_store_reviews?language=objc
+      final String urlPostfix = requestReview ? '?action=write-review' : '';
       return await urlLauncher('${getIosStoreListing(_appID)}$urlPostfix');
     } else {
       final String _appID = await _getPackageName();
