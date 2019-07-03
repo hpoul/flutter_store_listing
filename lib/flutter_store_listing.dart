@@ -30,13 +30,21 @@ class FlutterStoreListing {
 
   String getAndroidStoreListing(String appId) => 'https://play.google.com/store/apps/details?id=$appId';
 
-  Future<bool> requestReview() async {
+  /// launches a 'requestReview' dialog on iOS. If not available launches store URL externally.
+  /// If [onlyNative] is true, will do nothing if the native dialog is not available. (e.g. on android).
+  Future<bool> launchRequestReview({bool onlyNative = false}) async {
     if (Platform.isIOS) {
       if (!await _channel.invokeMethod<bool>('requestReview')) {
+        if (onlyNative) {
+          return false;
+        }
         return await launchStoreListing(requestReview: true);
       }
       return true;
     } else {
+      if (onlyNative) {
+        return false;
+      }
       return await launchStoreListing();
     }
   }
