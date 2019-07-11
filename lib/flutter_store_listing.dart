@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:logging/logging.dart';
 import 'package:package_info/package_info.dart';
-import 'package:url_launcher/url_launcher.dart' as defaultUrlLauncher;
+import 'package:url_launcher/url_launcher.dart' as default_url_launcher;
 
 final _logger = Logger('flutter_store_listing');
 
@@ -17,9 +17,9 @@ class FlutterStoreListing {
   String forceIosAppId;
   String forceAndroidPackageName;
 
-  Future<bool> Function(String url) urlCanLaunch = (url) async => await defaultUrlLauncher.canLaunch(url);
+  Future<bool> Function(String url) urlCanLaunch = (url) async => await default_url_launcher.canLaunch(url);
   Future<bool> Function(String url) urlLauncher =
-      (url) async => await defaultUrlLauncher.launch(url, forceSafariVC: false);
+      (url) async => await default_url_launcher.launch(url, forceSafariVC: false);
 
   static const MethodChannel _channel = MethodChannel('flutter_store_listing');
 

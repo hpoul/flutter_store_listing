@@ -1,8 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
-
-import 'package:flutter/services.dart';
-import 'package:flutter_store_listing/flutter_store_listing.dart';
 
 void main() => runApp(MyApp());
 
@@ -25,7 +21,7 @@ class _MyAppState extends State<MyApp> {
           title: const Text('Plugin example app'),
         ),
         body: Center(
-          child: Text('Running on'),
+          child: const Text('Running on'),
         ),
       ),
     );
