@@ -90,13 +90,9 @@ class FlutterStoreListing {
       return forceIosAppId;
     }
     final _appID = await _getPackageName();
-    return await http
-        .get('http://itunes.apple.com/lookup?bundleId=$_appID')
-        .then((dynamic response) {
-      final _json =
-          json.decode(response.body as String) as Map<String, dynamic>;
-      final _id = _json['results'][0]['trackId'].toString();
-      return _id;
-    });
+    final response =
+        await http.get('http://itunes.apple.com/lookup?bundleId=$_appID');
+    final _json = json.decode(response.body) as Map<String, dynamic>;
+    return _json['results'][0]['trackId'].toString();
   }
 }
