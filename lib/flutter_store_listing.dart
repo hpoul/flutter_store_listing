@@ -32,6 +32,7 @@ class FlutterStoreListing {
 
   static Future<bool> defaultUrlCanLaunch(String url) async =>
       await default_url_launcher.canLaunch(url);
+
   static Future<bool> defaultUrlLaunch(String url) async =>
       await default_url_launcher.launch(url, forceSafariVC: false);
 
@@ -57,15 +58,18 @@ class FlutterStoreListing {
 
   /// Whether review requests are supported
   /// (ie. iOS review dialog, since iOS 10.3)
-  Future<bool> isSupportedRequestReview() async {
+  Future<bool> isSupportedNativeRequestReview() async {
     if (!Platform.isIOS) {
       return false;
     }
     return _channel.invokeMethod<bool>('isSupportedRequestReview');
   }
 
-  /// launches a 'requestReview' dialog on iOS. If not available launches store URL externally.
-  /// If [onlyNative] is true, will do nothing if the native dialog is not available. (e.g. on android).
+  /// launches a 'requestReview' dialog on iOS. If not available launches
+  /// store URL externally.
+  ///
+  /// If [onlyNative] is true, will do nothing if the native dialog is not
+  /// available. (e.g. on android).
   Future<bool> launchRequestReview({bool onlyNative = false}) async {
     if (Platform.isIOS) {
       if (!await _channel.invokeMethod<bool>('requestReview')) {

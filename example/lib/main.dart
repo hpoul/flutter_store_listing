@@ -16,6 +16,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   String _appId = 'unknown';
+  bool _requestReviewSupported = false;
   final _fsl = FlutterStoreListing();
 
   @override
@@ -27,6 +28,10 @@ class _MyAppState extends State<MyApp> {
       } else if (Platform.isAndroid) {
         _appId = await _fsl.getAndroidPackageName();
       }
+      _requestReviewSupported = await _fsl.isSupportedNativeRequestReview();
+      if (mounted) {
+        setState(() {});
+      }
     })();
   }
 
@@ -37,16 +42,26 @@ class _MyAppState extends State<MyApp> {
         appBar: AppBar(
           title: const Text('Plugin example app'),
         ),
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: <Widget>[
-            Text(_appId),
-            RaisedButton(
-                child: const Text('Open Store Listing'),
-                onPressed: () async {
-                  await _fsl.launchStoreListing();
-                }),
-          ],
+        body: Align(
+          alignment: const Alignment(0, -0.3),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              Text(_appId),
+              RaisedButton(
+                  child: const Text('Open Store Listing'),
+                  onPressed: () async {
+                    await _fsl.launchStoreListing();
+                  }),
+              if (_requestReviewSupported)
+                RaisedButton(
+                    child: const Text('Request Review'),
+                    onPressed: () async {
+                      await _fsl.launchRequestReview(onlyNative: true);
+                    }),
+            ],
+          ),
         ),
       ),
     );
