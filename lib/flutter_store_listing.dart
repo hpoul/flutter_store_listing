@@ -76,7 +76,7 @@ class FlutterStoreListing {
         if (onlyNative) {
           return false;
         }
-        return await launchStoreListing(iosRequestReview: true);
+        return await launchStoreListing(iosWriteReview: true);
       }
       return true;
     } else {
@@ -90,13 +90,13 @@ class FlutterStoreListing {
   /// Launches a the URL for reviewing.
   /// * Android: If play store installed, opens play store via `market:` url,
   ///     otherwise launches `https://play.google.com/`
-  /// * iOS: Open `itunes.apple.com` - set [iOSRequestReview] to true to
+  /// * iOS: Open `itunes.apple.com` - set [iosWriteReview] to true to
   ///     use `?action=write-review`
-  Future<bool> launchStoreListing({bool iosRequestReview = true}) async {
+  Future<bool> launchStoreListing({bool iosWriteReview = true}) async {
     if (Platform.isIOS) {
       final _appID = await getIosAppId();
       // https://developer.apple.com/documentation/storekit/skstorereviewcontroller/requesting_app_store_reviews?language=objc
-      final urlPostfix = iosRequestReview ? '?action=write-review' : '';
+      final urlPostfix = iosWriteReview ? '?action=write-review' : '';
       return await urlLaunch('${getIosStoreListing(_appID)}$urlPostfix');
     } else {
       final _appID = await _getPackageName();

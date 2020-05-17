@@ -1,4 +1,4 @@
-## 0.1.1+1
+## 0.1.1+2
 
 * More documentation, updated links.
 * No longer a singleton, override app store id and android package name.
