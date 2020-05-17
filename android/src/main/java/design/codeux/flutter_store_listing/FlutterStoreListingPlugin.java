@@ -1,5 +1,9 @@
 package design.codeux.flutter_store_listing;
 
+import androidx.annotation.NonNull;
+
+import io.flutter.embedding.engine.plugins.FlutterPlugin;
+import io.flutter.plugin.common.BinaryMessenger;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
@@ -7,19 +11,28 @@ import io.flutter.plugin.common.MethodChannel.Result;
 import io.flutter.plugin.common.PluginRegistry.Registrar;
 
 /** FlutterStoreListingPlugin */
-public class FlutterStoreListingPlugin implements MethodCallHandler {
+public class FlutterStoreListingPlugin implements FlutterPlugin, MethodCallHandler {
   /** Plugin registration. */
   public static void registerWith(Registrar registrar) {
-    final MethodChannel channel = new MethodChannel(registrar.messenger(), "flutter_store_listing");
+    new FlutterStoreListingPlugin().register(registrar.messenger());
+  }
+
+  private void register(BinaryMessenger binaryMessenger) {
+    final MethodChannel channel = new MethodChannel(binaryMessenger, "flutter_store_listing");
     channel.setMethodCallHandler(new FlutterStoreListingPlugin());
   }
 
   @Override
-  public void onMethodCall(MethodCall call, Result result) {
-    if (call.method.equals("getPlatformVersion")) {
-      result.success("Android " + android.os.Build.VERSION.RELEASE);
-    } else {
-      result.notImplemented();
-    }
+  public void onMethodCall(@NonNull MethodCall call, Result result) {
+    result.notImplemented();
+  }
+
+  @Override
+  public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
+    register(binding.getBinaryMessenger());
+  }
+
+  @Override
+  public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
   }
 }
