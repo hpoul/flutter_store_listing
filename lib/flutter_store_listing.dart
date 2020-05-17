@@ -11,26 +11,58 @@ import 'package:url_launcher/url_launcher.dart' as default_url_launcher;
 final _logger = Logger('flutter_store_listing');
 
 class FlutterStoreListing {
-  FlutterStoreListing._();
+  FlutterStoreListing.customize({
+    this.forceIosAppId,
+    this.forceAndroidPackageName,
+    this.urlCanLaunch = defaultUrlCanLaunch,
+    this.urlLaunch = defaultUrlLaunch,
+  });
+
   factory FlutterStoreListing() => _instance;
 
-  String forceIosAppId;
-  String forceAndroidPackageName;
+  /// Allows overriding of the App Store App ID.
+  /// for example for https://apps.apple.com/app/id1479297675 this would be
+  /// `1479297675`. If not given, will try to resolve it through the
+  /// bundle identifier.
+  final String forceIosAppId;
 
-  Future<bool> Function(String url) urlCanLaunch =
-      (url) async => await default_url_launcher.canLaunch(url);
-  Future<bool> Function(String url) urlLauncher = (url) async =>
+  /// Override android package, if null it will be retrieved from the current
+  /// apk package.
+  final String forceAndroidPackageName;
+
+  static Future<bool> defaultUrlCanLaunch(String url) async =>
+      await default_url_launcher.canLaunch(url);
+  static Future<bool> defaultUrlLaunch(String url) async =>
       await default_url_launcher.launch(url, forceSafariVC: false);
+
+  final Future<bool> Function(String url) urlCanLaunch;
+  final Future<bool> Function(String url) urlLaunch;
 
   static const MethodChannel _channel = MethodChannel('flutter_store_listing');
 
-  static final _instance = FlutterStoreListing._();
+  static final _instance = FlutterStoreListing.customize();
 
+  /// Generates iOS Store listing for the given bundle identifier.
   String getIosStoreListing(String appId, {String protocol = 'https'}) =>
       '$protocol://itunes.apple.com/us/app/id$appId';
 
+  /// Generates iOS Store listing for the given package name.
   String getAndroidStoreListing(String appId) =>
       'https://play.google.com/store/apps/details?id=$appId';
+
+  /// Whether launching store listing at all is supported;
+  Future<bool> isSupported() async {
+    return Platform.isAndroid || Platform.isIOS;
+  }
+
+  /// Whether review requests are supported
+  /// (ie. iOS review dialog, since iOS 10.3)
+  Future<bool> isSupportedRequestReview() async {
+    if (!Platform.isIOS) {
+      return false;
+    }
+    return _channel.invokeMethod<bool>('isSupportedRequestReview');
+  }
 
   /// launches a 'requestReview' dialog on iOS. If not available launches store URL externally.
   /// If [onlyNative] is true, will do nothing if the native dialog is not available. (e.g. on android).
@@ -40,7 +72,7 @@ class FlutterStoreListing {
         if (onlyNative) {
           return false;
         }
-        return await launchStoreListing(requestReview: true);
+        return await launchStoreListing(iosRequestReview: true);
       }
       return true;
     } else {
@@ -51,18 +83,23 @@ class FlutterStoreListing {
     }
   }
 
-  Future<bool> launchStoreListing({bool requestReview}) async {
+  /// Launches a the URL for reviewing.
+  /// * Android: If play store installed, opens play store via `market:` url,
+  ///     otherwise launches `https://play.google.com/`
+  /// * iOS: Open `itunes.apple.com` - set [iOSRequestReview] to true to
+  ///     use `?action=write-review`
+  Future<bool> launchStoreListing({bool iosRequestReview = true}) async {
     if (Platform.isIOS) {
-      final _appID = await getIosAppId;
+      final _appID = await getIosAppId();
       // https://developer.apple.com/documentation/storekit/skstorereviewcontroller/requesting_app_store_reviews?language=objc
-      final urlPostfix = requestReview ? '?action=write-review' : '';
-      return await urlLauncher('${getIosStoreListing(_appID)}$urlPostfix');
+      final urlPostfix = iosRequestReview ? '?action=write-review' : '';
+      return await urlLaunch('${getIosStoreListing(_appID)}$urlPostfix');
     } else {
       final _appID = await _getPackageName();
       if (await urlCanLaunch('market://')) {
-        return await urlLauncher('market://details?id=$_appID');
+        return await urlLaunch('market://details?id=$_appID');
       } else {
-        return await urlLauncher(getAndroidStoreListing(_appID));
+        return await urlLaunch(getAndroidStoreListing(_appID));
       }
     }
   }
@@ -85,14 +122,25 @@ class FlutterStoreListing {
     return forceAndroidPackageName ?? await _getPackageName();
   }
 
-  Future<String> get getIosAppId async {
+  Future<String> getIosAppId() async {
     if (forceIosAppId != null) {
       return forceIosAppId;
     }
-    final _appID = await _getPackageName();
-    final response =
-        await http.get('http://itunes.apple.com/lookup?bundleId=$_appID');
-    final _json = json.decode(response.body) as Map<String, dynamic>;
-    return _json['results'][0]['trackId'].toString();
+    final packageName = await _getPackageName();
+    try {
+      final response = await http
+          .get('http://itunes.apple.com/lookup?bundleId=$packageName');
+      final responseJson = json.decode(response.body) as Map<String, dynamic>;
+      final results = responseJson['results'] as List;
+      if (results.isEmpty) {
+        _logger.severe('Unable to load app id, empty results for $packageName');
+        return null;
+      }
+      return results[0]['trackId'].toString();
+    } catch (error, stackTrace) {
+      _logger.severe(
+          'Unable to load app id for $packageName', error, stackTrace);
+      return null;
+    }
   }
 }

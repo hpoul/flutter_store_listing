@@ -20,6 +20,13 @@
           // Fallback on earlier versions
           result(@NO);
       }
+  } else if ([@"isSupportedRequestReview" isEqualToString:call.method]) {
+      if (@available(iOS 10.3, *)) {
+          result(@YES);
+      } else {
+          // Fallback on earlier versions
+          result(@NO);
+      }
   } else {
     result(FlutterMethodNotImplemented);
   }
