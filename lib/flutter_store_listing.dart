@@ -24,11 +24,11 @@ class FlutterStoreListing {
   /// for example for https://apps.apple.com/app/id1479297675 this would be
   /// `1479297675`. If not given, will try to resolve it through the
   /// bundle identifier.
-  final String forceIosAppId;
+  final String? forceIosAppId;
 
   /// Override android package, if null it will be retrieved from the current
   /// apk package.
-  final String forceAndroidPackageName;
+  final String? forceAndroidPackageName;
 
   static Future<bool> defaultUrlCanLaunch(String url) async =>
       await default_url_launcher.canLaunch(url);
@@ -44,7 +44,7 @@ class FlutterStoreListing {
   static final _instance = FlutterStoreListing.customize();
 
   /// Generates iOS Store listing for the given bundle identifier.
-  String getIosStoreListing(String appId, {String protocol = 'https'}) =>
+  String getIosStoreListing(String? appId, {String protocol = 'https'}) =>
       '$protocol://itunes.apple.com/us/app/id$appId';
 
   /// Generates Android Store listing for the given package name.
@@ -62,7 +62,7 @@ class FlutterStoreListing {
     if (!Platform.isIOS) {
       return false;
     }
-    return _channel.invokeMethod<bool>('isSupportedRequestReview');
+    return _channel.invokeMethod<bool>('isSupportedRequestReview') as FutureOr<bool>;
   }
 
   /// launches a 'requestReview' dialog on iOS. If not available launches
@@ -72,7 +72,7 @@ class FlutterStoreListing {
   /// available. (e.g. on android).
   Future<bool> launchRequestReview({bool onlyNative = false}) async {
     if (Platform.isIOS) {
-      if (!await _channel.invokeMethod<bool>('requestReview')) {
+      if (!await (_channel.invokeMethod<bool>('requestReview') as FutureOr<bool>)) {
         if (onlyNative) {
           return false;
         }
@@ -126,7 +126,7 @@ class FlutterStoreListing {
     return forceAndroidPackageName ?? await _getPackageName();
   }
 
-  Future<String> getIosAppId() async {
+  Future<String?> getIosAppId() async {
     if (forceIosAppId != null) {
       return forceIosAppId;
     }

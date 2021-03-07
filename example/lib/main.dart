@@ -50,16 +50,18 @@ class _MyAppState extends State<MyApp> {
             children: <Widget>[
               Text(_appId),
               ElevatedButton(
-                  child: const Text('Open Store Listing'),
-                  onPressed: () async {
-                    await _fsl.launchStoreListing();
-                  }),
+                onPressed: () async {
+                  await _fsl.launchStoreListing();
+                },
+                child: const Text('Open Store Listing'),
+              ),
               if (_requestReviewSupported)
                 ElevatedButton(
-                    child: const Text('Request Review'),
-                    onPressed: () async {
-                      await _fsl.launchRequestReview(onlyNative: true);
-                    }),
+                  onPressed: () async {
+                    await _fsl.launchRequestReview(onlyNative: true);
+                  },
+                  child: const Text('Request Review'),
+                ),
             ],
           ),
         ),

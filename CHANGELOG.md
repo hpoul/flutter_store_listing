@@ -1,3 +1,7 @@
+## 0.2.0
+
+* Nullsafety migration.
+
 ## 0.1.1+2
 
 * More documentation, updated links.
