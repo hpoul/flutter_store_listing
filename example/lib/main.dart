@@ -49,13 +49,13 @@ class _MyAppState extends State<MyApp> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
               Text(_appId),
-              RaisedButton(
+              ElevatedButton(
                   child: const Text('Open Store Listing'),
                   onPressed: () async {
                     await _fsl.launchStoreListing();
                   }),
               if (_requestReviewSupported)
-                RaisedButton(
+                ElevatedButton(
                     child: const Text('Request Review'),
                     onPressed: () async {
                       await _fsl.launchRequestReview(onlyNative: true);

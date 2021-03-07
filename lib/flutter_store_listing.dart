@@ -132,8 +132,8 @@ class FlutterStoreListing {
     }
     final packageName = await _getPackageName();
     try {
-      final response = await http
-          .get('http://itunes.apple.com/lookup?bundleId=$packageName');
+      final response = await http.get(
+          Uri.parse('http://itunes.apple.com/lookup?bundleId=$packageName'));
       final responseJson = json.decode(response.body) as Map<String, dynamic>;
       final results = responseJson['results'] as List;
       if (results.isEmpty) {
