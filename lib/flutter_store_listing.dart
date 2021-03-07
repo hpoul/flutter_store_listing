@@ -47,7 +47,7 @@ class FlutterStoreListing {
   String getIosStoreListing(String appId, {String protocol = 'https'}) =>
       '$protocol://itunes.apple.com/us/app/id$appId';
 
-  /// Generates iOS Store listing for the given package name.
+  /// Generates Android Store listing for the given package name.
   String getAndroidStoreListing(String appId) =>
       'https://play.google.com/store/apps/details?id=$appId';
 
@@ -87,7 +87,7 @@ class FlutterStoreListing {
     }
   }
 
-  /// Launches a the URL for reviewing.
+  /// Launches the URL for reviewing.
   /// * Android: If play store installed, opens play store via `market:` url,
   ///     otherwise launches `https://play.google.com/`
   /// * iOS: Open `itunes.apple.com` - set [iosWriteReview] to true to
