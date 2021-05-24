@@ -62,8 +62,14 @@ class FlutterStoreListing {
     if (!Platform.isIOS) {
       return false;
     }
-    return _channel.invokeMethod<bool>('isSupportedRequestReview') as FutureOr<bool>;
+    return _invokeIsSupportedRequestReview();
   }
+
+  Future<bool> _invokeIsSupportedRequestReview() async =>
+      (await _channel.invokeMethod<bool>('isSupportedRequestReview')) as bool;
+
+  Future<bool> _invokeRequestReview() async =>
+      (await _channel.invokeMethod<bool>('requestReview')) as bool;
 
   /// launches a 'requestReview' dialog on iOS. If not available launches
   /// store URL externally.
@@ -72,7 +78,7 @@ class FlutterStoreListing {
   /// available. (e.g. on android).
   Future<bool> launchRequestReview({bool onlyNative = false}) async {
     if (Platform.isIOS) {
-      if (!await (_channel.invokeMethod<bool>('requestReview') as FutureOr<bool>)) {
+      if (await _invokeRequestReview()) {
         if (onlyNative) {
           return false;
         }

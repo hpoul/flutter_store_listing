@@ -1,3 +1,7 @@
+## 0.2.0+1
+
+* Remove unnecessary casts.
+
 ## 0.2.0
 
 * Nullsafety migration.
