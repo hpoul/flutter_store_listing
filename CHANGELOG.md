@@ -1,3 +1,7 @@
+## 0.2.1
+
+* update to dependency `package_info_plus`
+
 ## 0.2.0+1
 
 * Remove unnecessary casts.
