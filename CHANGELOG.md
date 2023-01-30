@@ -1,3 +1,7 @@
+## 0.2.1+1
+
+* Update dependencies.
+
 ## 0.2.1
 
 * update to dependency `package_info_plus`
