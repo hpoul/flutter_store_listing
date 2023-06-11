@@ -1,3 +1,7 @@
+## 0.2.2
+
+* Update dependencies, dart 3.0
+
 ## 0.2.1+1
 
 * Update dependencies.

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:logging/logging.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart' as default_url_launcher;
+import 'package:url_launcher/url_launcher_string.dart';
 
 final _logger = Logger('flutter_store_listing');
 
@@ -31,10 +32,13 @@ class FlutterStoreListing {
   final String? forceAndroidPackageName;
 
   static Future<bool> defaultUrlCanLaunch(String url) async =>
-      await default_url_launcher.canLaunch(url);
+      await default_url_launcher.canLaunchUrl(Uri.parse(url));
 
   static Future<bool> defaultUrlLaunch(String url) async =>
-      await default_url_launcher.launch(url, forceSafariVC: false);
+      await default_url_launcher.launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      );
 
   final Future<bool> Function(String url) urlCanLaunch;
   final Future<bool> Function(String url) urlLaunch;
