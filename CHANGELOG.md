@@ -1,3 +1,8 @@
+## 0.3.0
+
+* Upgrade dependencies
+* Android: Upgrade to AGP 8.1, migrate namespace, etc.
+
 ## 0.2.2
 
 * Update dependencies, dart 3.0
