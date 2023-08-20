@@ -31,7 +31,7 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId "design.codeux.flutter_store_listing_example"
-        minSdkVersion 16
+        minSdkVersion 19
         targetSdk 33
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
