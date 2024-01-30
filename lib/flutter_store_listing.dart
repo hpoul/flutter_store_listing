@@ -104,16 +104,16 @@ class FlutterStoreListing {
   ///     use `?action=write-review`
   Future<bool> launchStoreListing({bool iosWriteReview = true}) async {
     if (Platform.isIOS) {
-      final _appID = await getIosAppId();
+      final appId = await getIosAppId();
       // https://developer.apple.com/documentation/storekit/skstorereviewcontroller/requesting_app_store_reviews?language=objc
       final urlPostfix = iosWriteReview ? '?action=write-review' : '';
-      return await urlLaunch('${getIosStoreListing(_appID)}$urlPostfix');
+      return await urlLaunch('${getIosStoreListing(appId)}$urlPostfix');
     } else {
-      final _appID = await _getPackageName();
+      final appId = await _getPackageName();
       if (await urlCanLaunch('market://')) {
-        return await urlLaunch('market://details?id=$_appID');
+        return await urlLaunch('market://details?id=$appId');
       } else {
-        return await urlLaunch(getAndroidStoreListing(_appID));
+        return await urlLaunch(getAndroidStoreListing(appId));
       }
     }
   }

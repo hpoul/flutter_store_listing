@@ -6,7 +6,7 @@ import 'package:logging_appenders/logging_appenders.dart';
 
 void main() {
   PrintAppender.setupLogging();
-  runApp(MyApp());
+  runApp(const MyApp());
 }
 
 class MyApp extends StatefulWidget {
