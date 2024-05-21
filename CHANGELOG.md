@@ -1,3 +1,7 @@
+## 1.0.0
+
+* Upgrade `package_info_plus` dependency.
+
 ## 0.3.1
 
 * Upgrade dependencies.
