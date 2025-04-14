@@ -1,3 +1,7 @@
+## 1.1.0
+
+* Compatibility with Flutter 3.29
+
 ## 1.0.0
 
 * Upgrade `package_info_plus` dependency.
