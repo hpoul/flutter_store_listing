@@ -1,3 +1,7 @@
+## 1.2.0
+
+* Update AGB Version, Android SDK Version, etc.
+
 ## 1.1.0
 
 * Compatibility with Flutter 3.29
