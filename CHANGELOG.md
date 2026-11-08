@@ -1,3 +1,17 @@
+## 1.3.0
+
+* Allow `package_info_plus` 10.x (widened to `>=1.0.3 <11.0.0`).
+* Remove the discontinued `pedantic` dependency (it was unused, and declared
+  as a runtime instead of a dev dependency).
+* iOS: use `https` for the iTunes lookup API — App Transport Security blocks
+  cleartext `http` by default.
+* iOS: generate store listing URLs for `apps.apple.com` without a hardcoded
+  `/us/` storefront, instead of the legacy `itunes.apple.com/us/app/id…` form.
+* Declare honest `environment` minimums (Dart 3.8 / Flutter 3.32) and give the
+  iOS podspec real metadata and a 13.0 deployment target.
+* Android: raise `minSdkVersion` to the Flutter floor, use the AGP 8 `lint`
+  block and drop the obsolete `android.enableJetifier`.
+
 ## 1.2.0
 
 * Update AGB Version, Android SDK Version, etc.

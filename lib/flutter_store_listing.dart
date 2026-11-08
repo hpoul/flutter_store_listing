@@ -48,8 +48,11 @@ class FlutterStoreListing {
   static final _instance = FlutterStoreListing.customize();
 
   /// Generates iOS Store listing for the given bundle identifier.
+  ///
+  /// Uses the current `apps.apple.com` host without a hardcoded storefront
+  /// (the App Store redirects to the viewer's own region).
   String getIosStoreListing(String? appId, {String protocol = 'https'}) =>
-      '$protocol://itunes.apple.com/us/app/id$appId';
+      '$protocol://apps.apple.com/app/id$appId';
 
   /// Generates Android Store listing for the given package name.
   String getAndroidStoreListing(String appId) =>
@@ -100,7 +103,7 @@ class FlutterStoreListing {
   /// Launches the URL for reviewing.
   /// * Android: If play store installed, opens play store via `market:` url,
   ///     otherwise launches `https://play.google.com/`
-  /// * iOS: Open `itunes.apple.com` - set [iosWriteReview] to true to
+  /// * iOS: Open `apps.apple.com` - set [iosWriteReview] to true to
   ///     use `?action=write-review`
   Future<bool> launchStoreListing({bool iosWriteReview = true}) async {
     if (Platform.isIOS) {
@@ -127,7 +130,8 @@ class FlutterStoreListing {
     final buildNumber = packageInfo.buildNumber;
 
     _logger.finer(
-        'App Name: $appName\nPackage Name: $packageName\nVersion: $version\nBuild Number: $buildNumber');
+      'App Name: $appName\nPackage Name: $packageName\nVersion: $version\nBuild Number: $buildNumber',
+    );
 
     return packageName;
   }
@@ -142,8 +146,11 @@ class FlutterStoreListing {
     }
     final packageName = await _getPackageName();
     try {
+      // Must be https: iOS App Transport Security blocks cleartext http
+      // requests by default.
       final response = await http.get(
-          Uri.parse('http://itunes.apple.com/lookup?bundleId=$packageName'));
+        Uri.parse('https://itunes.apple.com/lookup?bundleId=$packageName'),
+      );
       final responseJson = json.decode(response.body) as Map<String, dynamic>;
       final results = responseJson['results'] as List;
       if (results.isEmpty) {
@@ -153,7 +160,10 @@ class FlutterStoreListing {
       return results[0]['trackId'].toString();
     } catch (error, stackTrace) {
       _logger.severe(
-          'Unable to load app id for $packageName', error, stackTrace);
+        'Unable to load app id for $packageName',
+        error,
+        stackTrace,
+      );
       return null;
     }
   }
