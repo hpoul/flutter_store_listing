@@ -1,16 +1,46 @@
 ## 1.3.0
 
-* Allow `package_info_plus` 10.x (widened to `>=1.0.3 <11.0.0`).
+**Requires Flutter 3.44 / Dart 3.10.** Swift Package Manager support needs the
+generated `FlutterFramework` Swift package, which Flutter only produces from
+3.44.0 on.
+
+* Allow `package_info_plus` 10.x (widened to `>=1.0.3 <11.0.0`). This was the
+  only thing making version solving fail for apps that need
+  `package_info_plus` 10.x.
+* Add **Swift Package Manager support**. The plugin ships
+  `ios/flutter_store_listing/Package.swift` alongside the podspec, so it no
+  longer appears in Flutter's "plugins do not support Swift Package Manager"
+  warning. CocoaPods consumers are unaffected; both build the same sources.
+* Rewrite the iOS plugin in **Swift**. This is a prerequisite for the item
+  below: `AppStore.requestReview(in:)` is a Swift-only StoreKit 2 API and
+  cannot be called from Objective-C.
+* iOS: use **`AppStore.requestReview(in:)`** on iOS 16+. The whole
+  `SKStoreReviewController` class is deprecated as of iOS 18; the deprecated
+  `requestReview(in:)` remains the fallback for iOS 13-15. The old
+  `@available(iOS 10.3, *)` guards and the no-scene `requestReview()` call are
+  gone.
+* **Remove the Android platform entry.** Its `onMethodCall` only ever returned
+  `notImplemented()`, and the Dart side never invoked the channel off iOS, so
+  consumers were building an AAR for nothing. Nothing changes at runtime:
+  Android still opens the Play listing through `url_launcher`. Play's in-app
+  review API is deliberately left out so this package stays free of
+  proprietary dependencies, which would otherwise reach F-Droid builds.
+* Fix `forceAndroidPackageName` being ignored by `launchStoreListing()`, which
+  read the package name straight from `package_info_plus`.
+* The package is now **WebAssembly-compatible**: `dart:io` is behind a
+  conditional import instead of being imported unconditionally for `Platform`.
 * Remove the discontinued `pedantic` dependency (it was unused, and declared
   as a runtime instead of a dev dependency).
 * iOS: use `https` for the iTunes lookup API — App Transport Security blocks
-  cleartext `http` by default.
+  cleartext `http` by default, so this likely failed on device unless the host
+  app carried an ATS exception.
 * iOS: generate store listing URLs for `apps.apple.com` without a hardcoded
   `/us/` storefront, instead of the legacy `itunes.apple.com/us/app/id…` form.
-* Declare honest `environment` minimums (Dart 3.8 / Flutter 3.32) and give the
-  iOS podspec real metadata and a 13.0 deployment target.
-* Android: raise `minSdkVersion` to the Flutter floor, use the AGP 8 `lint`
-  block and drop the obsolete `android.enableJetifier`.
+* Give the iOS podspec real metadata (it was unedited template boilerplate)
+  and a 13.0 deployment target.
+* Add an actual test suite — the previous one was an empty `main()` — and a
+  GitHub Actions workflow that analyzes, formats, tests and builds the example
+  for iOS.
 
 ## 1.2.0
 

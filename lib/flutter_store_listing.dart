@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -9,7 +8,17 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart' as default_url_launcher;
 import 'package:url_launcher/url_launcher_string.dart';
 
+// Not `dart:io` directly: importing it here unconditionally is what made the
+// whole package report as WebAssembly-incompatible. The io branch still uses
+// `dart:io`.
+import 'src/platform_os_io.dart'
+    if (dart.library.js_interop) 'src/platform_os_web.dart';
+
 final _logger = Logger('flutter_store_listing');
+
+bool get _isIOS => operatingSystem == 'ios';
+
+bool get _isAndroid => operatingSystem == 'android';
 
 class FlutterStoreListing {
   FlutterStoreListing.customize({
@@ -60,13 +69,13 @@ class FlutterStoreListing {
 
   /// Whether launching store listing at all is supported;
   Future<bool> isSupported() async {
-    return Platform.isAndroid || Platform.isIOS;
+    return _isAndroid || _isIOS;
   }
 
   /// Whether review requests are supported
   /// (ie. iOS review dialog, since iOS 10.3)
   Future<bool> isSupportedNativeRequestReview() async {
-    if (!Platform.isIOS) {
+    if (!_isIOS) {
       return false;
     }
     return _invokeIsSupportedRequestReview();
@@ -84,7 +93,7 @@ class FlutterStoreListing {
   /// If [onlyNative] is true, will do nothing if the native dialog is not
   /// available. (e.g. on android).
   Future<bool> launchRequestReview({bool onlyNative = false}) async {
-    if (Platform.isIOS) {
+    if (_isIOS) {
       if (await _invokeRequestReview()) {
         if (onlyNative) {
           return false;
@@ -106,13 +115,16 @@ class FlutterStoreListing {
   /// * iOS: Open `apps.apple.com` - set [iosWriteReview] to true to
   ///     use `?action=write-review`
   Future<bool> launchStoreListing({bool iosWriteReview = true}) async {
-    if (Platform.isIOS) {
+    if (_isIOS) {
       final appId = await getIosAppId();
       // https://developer.apple.com/documentation/storekit/skstorereviewcontroller/requesting_app_store_reviews?language=objc
       final urlPostfix = iosWriteReview ? '?action=write-review' : '';
       return await urlLaunch('${getIosStoreListing(appId)}$urlPostfix');
     } else {
-      final appId = await _getPackageName();
+      // getAndroidPackageName(), not _getPackageName(): the former honours the
+      // documented [forceAndroidPackageName] override, which this method used
+      // to ignore.
+      final appId = await getAndroidPackageName();
       if (await urlCanLaunch('market://')) {
         return await urlLaunch('market://details?id=$appId');
       } else {

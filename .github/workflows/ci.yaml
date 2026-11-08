@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: flutter --version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # `flutter pub get` runs a migrator that rewrites analysis_options.yaml,
+      # so check formatting against the committed sources only.
+      - name: Verify formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Test
+        run: flutter test
+
+      - name: Publish dry run
+        run: flutter pub publish --dry-run
+
+  build-example-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # Builds the Swift sources through the example app, so the iOS plugin
+      # cannot break without CI noticing. --no-codesign keeps it key-free.
+      - name: Build example (iOS)
+        working-directory: example
+        run: |
+          flutter pub get
+          flutter build ios --no-codesign --debug
