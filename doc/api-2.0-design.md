@@ -1149,3 +1149,122 @@ them do not.
   implementable; what was missing was the mechanism, now supplied. The
   conclusion was overstated, the underlying observation was right, and acting
   only on the latter is why §2.4 gained code rather than a caveat.
+
+## 11. Review log — the implementation
+
+Two reviewers read the implementation branch, one on runtime correctness and
+one on whether the tests and the documented claims hold. 19 findings. The
+pattern from the design rounds repeated exactly: the structural decisions
+survived — outcomes, the platform as a value, the deleted iTunes lookup, no
+unnamed constructor, per-call resolution — and the confident sentences around
+them did not.
+
+### §2.5 was wrong about precedence, and the code followed it
+
+**`configure(inAppReview: …)` replaced the iOS prompt instead of being
+preferred over it.** This section documents that seam as *the* Android
+extension point and tells an app to wire a Play-backed prompt in with one
+global call in `main()`. `configure` has no platform parameter, so that call
+also took effect on iOS — where a Play prompt reports itself unavailable, so
+`requestReview()` skipped StoreKit entirely and ran the fallback. An app
+shipping on both stores, following this document exactly, would have sent its
+iOS users to the App Store write-review page instead of showing the native
+rating dialog, while `isInAppReviewSupported` still answered `true`.
+
+The implementation now **prefers** a configured prompt rather than substituting
+it: `PreferredInAppReview` asks it first on every platform and keeps this
+package's own prompt behind it. A prompt passed to `custom()` still wins
+outright, which is what §2.4 promises. This is the one place where the
+implementation deliberately departs from the merged design, and it departs in
+order to make §2.5's own instruction correct.
+
+### Two cross-level resolution bugs
+
+* **A global `macAppStoreId` beat an instance's own `appStoreId`.** The Mac
+  fallback chained to the *effective* App Store id, so the two levels
+  interleaved and an explicit `custom(appStoreId:)` lost to a `configure()`
+  default it never asked about. Both instance ids are now consulted before
+  either configured one.
+* **`ReviewFallback.none` reported `unsupportedPlatform` where
+  `isInAppReviewSupported` said `true`.** A prompt configured on a platform
+  with no store — web — made the two answers contradict each other. The
+  platform is now blamed only when there is no prompt to blame instead, which
+  keeps the original intent for the case it was written for.
+
+### The no-throw contract was aspirational in three places
+
+`seams.dart` states it absolutely, so it cannot rest on having enumerated the
+exception types a channel can produce. `invokeMethod<String>` *casts*, so a
+native side replying with anything but a string threw a `TypeError` past both
+clauses and out of a method §2.6 says degrades on an unrecognised reply — an
+unrecognised reply *type* being an unrecognised reply. That call now takes
+`Object?`, and each bundled implementation ends in a bare `catch`.
+
+### Tests that could not fail
+
+* **No test put macOS through the URL switch.** Changing its arm to
+  `playStoreWebUri` passed all 54 tests — the suite could not detect the
+  defect 2.0 exists to fix. Verified by making that mutation: it now fails
+  three tests.
+* **`resetConfiguration clears it` was host-dependent**, the one test in the
+  file breaking §4's own rule. Reset clears the platform too, so the read fell
+  through to the host: on the `linux` CI runner every id is null whether or not
+  reset cleared it, so it passed on a reset that did nothing, while catching a
+  real failure on a macOS developer machine.
+* **The `configure()` merge test's prompt assertion passed under replace
+  semantics**, because `isInAppReviewSupported` was true from the platform as
+  well as the prompt.
+* `resolveStorePlatform` — the original bug's own site — had no test at all.
+  It now takes the OS name so the mapping can be asserted.
+
+### Documentation that described other behaviour
+
+* `inAppReviewUnavailable` listed two causes and omitted the third, which is
+  the one 2.0 added: a prompt that was available and *refused*. Reading it as
+  "no prompt here, ever" and hiding the row for good was the natural mistake.
+* `ReviewFallback.none` promised `inAppReviewUnavailable` where the code
+  returns `unsupportedPlatform`, and a passing test asserted the code.
+* The launcher contract contradicted itself inside one sentence: "an exception
+  propagates out of `openStoreListing`, which returns an outcome rather than
+  throwing".
+* `configure`'s "report `storeIdUnavailable` — and assert" cannot both happen.
+  Debug throws; release reports.
+* **Every `[…]` reference in `outcomes.dart` and `seams.dart` rendered as
+  literal brackets**, because neither library imports the facade and dartdoc
+  resolves in the enclosing library's scope only. `comment_references` is not
+  in `flutter_lints`, so nothing warned. Fixed with `@docImport`.
+
+### §3's macOS claim, narrowed again
+
+`pubspec.yaml` declares no `macos` platform, so pub.dev badges this package
+Android and iOS while the README advertised macOS support. Checked against
+Flutter's own plugin documentation rather than assumed: `dartPluginClass` is
+for federated implementations that subclass a platform interface and carry a
+`registerWith()`, which this package is not, and `pluginClass: none` is not
+documented at all. Declaring macOS therefore means shipping a `macos/`
+directory, which belongs with the native macOS prompt in 2.1. The runtime
+behaviour is fine — the macOS path is `url_launcher` only — so this is a
+documentation fix, and README and CHANGELOG now say so.
+
+### Not taken
+
+* **That a transient `.foregroundInactive` scene should not run the
+  fallback.** The reviewer is right that §6 routes a *temporary* state into the
+  same fallback as a *permanent* one, so an app calling `requestReview()` from
+  a post-frame callback on a cold start can eject the user to the App Store
+  with no interaction. But §2.6 specifies this mapping in as many words —
+  "`isAvailable()` false, **or `requestReview()` false** → the `ReviewFallback`
+  runs" — and §6 states the consequence and accepts it. Distinguishing "not
+  now" from "not ever" needs a third signal through
+  `InAppReviewPrompt.requestReview`'s `bool`, which is a design change rather
+  than a review fix, and it is the design that would be changing. Raised for
+  decision, not applied.
+* **That the debug `assert` escaping `requestReview()` is a defect.** It is
+  deliberate and documented: a missing build-time constant is worth a red
+  screen in debug, and release builds report the outcome. Only the wording
+  claiming both happen at once was wrong.
+
+### Rejected
+
+* Nothing. Every finding either held or was a design disagreement recorded
+  above — the first round of this project where no claim was simply wrong.

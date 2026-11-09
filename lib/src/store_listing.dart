@@ -83,8 +83,12 @@ class FlutterStoreListing {
   /// [appStoreId] is the numeric App Store id — for
   /// `https://apps.apple.com/app/id1479297675` it is `1479297675`. It is a
   /// build-time constant; there is no runtime lookup, so without it Apple
-  /// platforms report [StoreListingOutcome.storeIdUnavailable] — and assert,
-  /// in debug builds only.
+  /// platforms cannot build a URL at all. A **debug** build asserts, which
+  /// throws rather than returning — the outcome is for shipped code, and a
+  /// missing build-time constant is a mistake worth a red screen. A **release**
+  /// build reports [StoreListingOutcome.storeIdUnavailable], because an app
+  /// may legitimately run unconfigured. Both reach that assert through
+  /// [requestReview] too, whose default fallback opens the listing.
   ///
   /// [macAppStoreId] defaults to [appStoreId], which is correct under
   /// universal purchase. Apps with separate iOS and Mac SKUs have two ids, and
@@ -142,11 +146,21 @@ class FlutterStoreListing {
 
   String? get _effectiveAppStoreId => _appStoreId ?? _configuredAppStoreId;
 
-  /// Falls back to [_effectiveAppStoreId], which is correct under universal
+  /// Falls back to the App Store id, which is correct under universal
   /// purchase. The reverse default would silently send Mac users to the iOS
   /// listing.
+  ///
+  /// Both of this instance's own ids are consulted before either configured
+  /// one, rather than chaining to [_effectiveAppStoreId] at the end. Chaining
+  /// interleaved the two levels: a global `configure(macAppStoreId: 'M')` beat
+  /// an instance built with `custom(appStoreId: 'B')`, so an explicit argument
+  /// lost to a default the caller never asked about — which is the opposite of
+  /// what [custom] documents.
   String? get _effectiveMacAppStoreId =>
-      _macAppStoreId ?? _configuredMacAppStoreId ?? _effectiveAppStoreId;
+      _macAppStoreId ??
+      _appStoreId ??
+      _configuredMacAppStoreId ??
+      _configuredAppStoreId;
 
   String? get _effectiveAndroidPackageName =>
       _androidPackageName ?? _configuredAndroidPackageName;
@@ -159,10 +173,24 @@ class FlutterStoreListing {
       _configuredLauncher ??
       DefaultStoreListingLauncher(_effectivePlatform);
 
-  InAppReviewPrompt get _effectiveInAppReview =>
-      _inAppReview ??
-      _configuredInAppReview ??
-      StoreKitInAppReview(_effectivePlatform);
+  /// A prompt given to [custom] wins outright, as [custom] documents. A prompt
+  /// given to [configure] is *preferred* instead of substituted, because
+  /// [configure] is global while a prompt is usually platform-specific: the
+  /// Play-backed prompt §2.5 exists for would otherwise have displaced
+  /// StoreKit on iOS for every app that ships on both stores. See
+  /// [PreferredInAppReview].
+  InAppReviewPrompt get _effectiveInAppReview {
+    final explicit = _inAppReview;
+    if (explicit != null) {
+      return explicit;
+    }
+    final builtIn = StoreKitInAppReview(_effectivePlatform);
+    final configured = _configuredInAppReview;
+    if (configured == null) {
+      return builtIn;
+    }
+    return PreferredInAppReview(preferred: configured, builtIn: builtIn);
+  }
 
   /// Whether this platform has a store listing *this app* can open.
   ///
@@ -218,7 +246,14 @@ class FlutterStoreListing {
         // Still distinguish "no store at all" from "a store but no prompt":
         // reporting the former on Android, where the listing works perfectly,
         // is the conflation this enum exists to remove.
-        return _effectivePlatform == StorePlatform.unsupported
+        //
+        // `isInAppReviewSupported` guards it because a prompt can be
+        // configured on a platform that has no store — a web prompt, say. The
+        // platform check alone then reported `unsupportedPlatform` about a
+        // configuration whose own getter answered true, so the two
+        // contradicted each other.
+        return _effectivePlatform == StorePlatform.unsupported &&
+                !isInAppReviewSupported
             ? StoreListingOutcome.unsupportedPlatform
             : StoreListingOutcome.inAppReviewUnavailable;
       case ReviewFallback.writeReviewPage:

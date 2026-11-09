@@ -41,9 +41,15 @@ enum StorePlatform {
 /// `defaultTargetPlatform` reports the platform Flutter is *emulating*. An app
 /// setting `debugDefaultTargetPlatformOverride` would otherwise make this
 /// package invoke an iOS-only method channel on Android.
-StorePlatform resolveStorePlatform() => switch (operatingSystem) {
-  'android' => StorePlatform.android,
-  'ios' => StorePlatform.iOS,
-  'macos' => StorePlatform.macOS,
-  _ => StorePlatform.unsupported,
-};
+///
+/// [os] defaults to the host's, and exists so the mapping itself has a test.
+/// It is the site of the original bug and the one part of the library the
+/// conditional import still hides, so a parameter with a default is cheaper
+/// than leaving the default path unasserted.
+StorePlatform resolveStorePlatform([String? os]) =>
+    switch (os ?? operatingSystem) {
+      'android' => StorePlatform.android,
+      'ios' => StorePlatform.iOS,
+      'macos' => StorePlatform.macOS,
+      _ => StorePlatform.unsupported,
+    };

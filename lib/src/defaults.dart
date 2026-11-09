@@ -1,3 +1,8 @@
+/// The implementations of the three seams that ship with this package.
+///
+/// @docImport 'store_listing.dart';
+library;
+
 import 'package:flutter/services.dart';
 import 'package:logging/logging.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -48,7 +53,14 @@ class DefaultStoreListingLauncher implements StoreListingLauncher {
   /// falls back to `url_launcher`; true or false when it did answer.
   Future<bool?> _openOnAndroid(Uri uri) async {
     try {
-      final result = await _channel.invokeMethod<String>('openStoreListing', {
+      // `Object?`, not `String`. `invokeMethod<String>` casts the reply, so a
+      // native side answering with anything else — a bool, a map, a future
+      // Kotlin change — throws a `TypeError` that is neither of the exceptions
+      // caught below, straight out of a method whose contract forbids
+      // throwing. An unrecognised reply *type* is an unrecognised reply, and
+      // §2.6 says those degrade to url_launcher rather than failing. The
+      // switch below already has that branch; this makes it reachable.
+      final result = await _channel.invokeMethod<Object?>('openStoreListing', {
         'url': uri.toString(),
         'preferredPackage': _playStorePackageName,
       });
@@ -90,6 +102,17 @@ class DefaultStoreListingLauncher implements StoreListingLauncher {
         stackTrace,
       );
       return false;
+    } catch (error, stackTrace) {
+      // `seams.dart` states the no-throw rule absolutely, so it cannot rest on
+      // having enumerated every exception type a channel can produce. Null, so
+      // anything unforeseen degrades to url_launcher exactly like a reply the
+      // Dart side cannot read.
+      _logger.severe(
+        'Unexpected error opening the store listing natively.',
+        error,
+        stackTrace,
+      );
+      return null;
     }
   }
 
@@ -116,6 +139,12 @@ class DefaultStoreListingLauncher implements StoreListingLauncher {
       // method promises a bool. The reachable case on Android is a detached
       // activity: `url_launcher` is `ActivityAware` too.
       _logger.severe('Unable to open $uri.', error, stackTrace);
+      return false;
+    } catch (error, stackTrace) {
+      // Nothing further to fall back to from here, so the no-throw contract is
+      // the only thing left to honour. `launchUrl` also throws `ArgumentError`
+      // for a scheme no handler claims, which neither clause above catches.
+      _logger.severe('Unexpected error opening $uri.', error, stackTrace);
       return false;
     }
   }
@@ -177,6 +206,63 @@ class StoreKitInAppReview implements InAppReviewPrompt {
     } on PlatformException catch (error, stackTrace) {
       _logger.severe('Unable to request a review.', error, stackTrace);
       return false;
+    } catch (error, stackTrace) {
+      // Including a `TypeError` from the reply cast above, which is why that
+      // one is `invokeMethod<bool>` with a `?? false` rather than a cast.
+      _logger.severe(
+        'Unexpected error requesting a review.',
+        error,
+        stackTrace,
+      );
+      return false;
     }
+  }
+}
+
+/// Tries [preferred] and keeps [builtIn] for where the preferred prompt
+/// reports itself unavailable.
+///
+/// This exists because of what the obvious resolution order did to an app
+/// shipping on both stores. `InAppReviewPrompt` is documented as the Android
+/// extension point — you pass a Play-backed prompt to
+/// [FlutterStoreListing.configure] once, in `main()` — but `configure` is
+/// global and the platform is not a parameter of it, so that one call also
+/// replaced the iOS StoreKit prompt. A Play prompt reports itself unavailable
+/// on iOS, so `requestReview()` skipped StoreKit entirely and ran the
+/// fallback: the user who should have seen the native rating dialog was sent
+/// to the App Store write-review page instead, while
+/// `isInAppReviewSupported` still answered true.
+///
+/// Composing rather than dispatching on the platform keeps §2.5's promise that
+/// there is exactly one contract to honour, and keeps the configured prompt
+/// first on every platform rather than silently ignoring it on one.
+class PreferredInAppReview implements InAppReviewPrompt {
+  const PreferredInAppReview({required this.preferred, required this.builtIn});
+
+  /// The prompt passed to [FlutterStoreListing.configure].
+  final InAppReviewPrompt preferred;
+
+  /// The prompt this package ships for the running platform.
+  final InAppReviewPrompt builtIn;
+
+  @override
+  Future<bool> isAvailable() async =>
+      await preferred.isAvailable() || await builtIn.isAvailable();
+
+  /// Asks whichever prompt is available, preferring [preferred].
+  ///
+  /// Re-asks [InAppReviewPrompt.isAvailable] rather than remembering what the
+  /// facade's own availability check found: both answers are cheap — StoreKit's
+  /// is a platform comparison with no channel call — and a stateless resolution
+  /// cannot answer for one prompt and then request from the other.
+  @override
+  Future<bool> requestReview() async {
+    if (await preferred.isAvailable()) {
+      return await preferred.requestReview();
+    }
+    if (await builtIn.isAvailable()) {
+      return await builtIn.requestReview();
+    }
+    return false;
   }
 }

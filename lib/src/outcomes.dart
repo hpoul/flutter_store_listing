@@ -1,3 +1,17 @@
+/// The outcome and fallback enums.
+///
+/// The `@docImport` directives are what make `[InAppReviewPrompt]` and
+/// `[FlutterStoreListing.configure]` below render as links. This library has
+/// no code-level import of either — the dependency runs the other way — and
+/// dartdoc resolves a reference in the enclosing library's scope only, so
+/// without these the two names a migrating caller reads first would render as
+/// literal square brackets on pub.dev. `comment_references` is not in
+/// `flutter_lints`, so nothing warns about it.
+///
+/// @docImport 'seams.dart';
+/// @docImport 'store_listing.dart';
+library;
+
 /// What happened when a review or store listing was requested.
 ///
 /// Replaces the bare `bool` that every method returned up to 1.4.0, where
@@ -43,11 +57,16 @@ enum StoreListingOutcome {
   /// This platform has no app store at all. Web, Windows, Linux.
   unsupportedPlatform,
 
-  /// This platform has a store, but no in-app review prompt — and you asked
+  /// This platform has a store, but no review prompt was shown — and you asked
   /// for no fallback.
   ///
-  /// Android with no [InAppReviewPrompt] configured, or a prompt that reported
-  /// itself unavailable at request time.
+  /// Three causes, which this value does not distinguish: Android with no
+  /// [InAppReviewPrompt] configured; a prompt that reported itself unavailable
+  /// at request time; or **a prompt that was available and refused the
+  /// request**. The third is the signal 2.0 added on iOS, where StoreKit has
+  /// no foreground-active scene to present into — so it is not safe to read
+  /// this as "this platform will never have a prompt" and hide the row for
+  /// good.
   inAppReviewUnavailable,
 
   /// The store id for this platform is not known, so no URL could be built.
@@ -85,6 +104,12 @@ enum ReviewFallback {
   /// Open the plain store listing.
   storeListing,
 
-  /// Do nothing, and report [StoreListingOutcome.inAppReviewUnavailable].
+  /// Do nothing, and report why.
+  ///
+  /// [StoreListingOutcome.inAppReviewUnavailable], except on a platform that
+  /// has neither a store nor a configured prompt, where there is nothing to be
+  /// unavailable and the outcome is
+  /// [StoreListingOutcome.unsupportedPlatform]. Switch on both, or on
+  /// `isSuccess`.
   none,
 }

@@ -90,15 +90,37 @@ await FlutterStoreListing.instance.openStoreListing(writeReview: true);
   can implement it against Play's review API and you wire it in with
   `configure(inAppReview: …)`, so the proprietary Play dependency stays out of
   this package and out of F-Droid builds. No such package is published yet.
+* **A prompt passed to `configure()` is *preferred*, not substituted.**
+  `configure()` is global and a prompt is usually platform-specific, so the one
+  call above would otherwise have replaced StoreKit on iOS for every app that
+  ships on both stores — and a Play-backed prompt reports itself unavailable on
+  iOS, so the user who should have seen the native rating dialog got the App
+  Store write-review page instead. The configured prompt is asked first on
+  every platform and this package's own prompt stays behind it
+  (`PreferredInAppReview`). A prompt passed to `custom()` still wins outright.
+* **The bundled implementations are exported**
+  (`DefaultStoreListingLauncher`, `PackageInfoStoreIdentity`,
+  `StoreKitInAppReview`, `PreferredInAppReview`), so you can decorate the
+  default behaviour — log a launch, confirm before leaving the app — instead of
+  reimplementing the Android store intent to get at it.
+* **macOS support is Dart-only and `pubspec.yaml` declares no macOS platform**,
+  so pub.dev badges this package Android and iOS. The macOS path builds an
+  `apps.apple.com` URL and hands it to `url_launcher`, so there is no native
+  implementation here to register; declaring the platform means shipping a
+  `macos/` directory, which lands with the native macOS prompt. The listing
+  works on macOS with no extra step on your side.
 * `configure()` **merges**: an argument left out keeps its current value, so an
   app's own call and a review package's compose rather than overwriting.
 * The shared instance reads its configuration **per call**, so a reference
   captured in a `State` field initialiser before `main()` configures it still
   works.
-* The Android Kotlin implementation is unchanged from 1.4.0 apart from one
-  comment. The Dart side now distinguishes `MissingPluginException` (fall back
-  to `url_launcher`) from a `PlatformException` such as `no_activity` (do not —
-  `url_launcher` is `ActivityAware` too and detached in the same window).
+* The Android Kotlin implementation is unchanged from 1.4.0 apart from the
+  `no_activity` comment, which described the Dart retry this release removes.
+  The Dart side now distinguishes `MissingPluginException` (fall back to
+  `url_launcher`) from a `PlatformException` such as `no_activity` (do not —
+  `url_launcher` is `ActivityAware` too and detached in the same window), and a
+  reply it cannot read — a wrong type included — falls back rather than
+  throwing out of a method that promises an outcome.
 
 ## 1.4.0
 

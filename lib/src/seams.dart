@@ -1,3 +1,12 @@
+/// The three seams every external dependency goes through.
+///
+/// `@docImport` so that the `[FlutterStoreListing.…]` references below resolve
+/// to links: this library deliberately has no import of the facade, since the
+/// facade depends on it.
+///
+/// @docImport 'store_listing.dart';
+library;
+
 /// Opens a store listing.
 ///
 /// Named for the job rather than the mechanism, deliberately. A
@@ -11,9 +20,11 @@ abstract interface class StoreListingLauncher {
   /// Opens [uri] externally, reporting whether it was opened.
   ///
   /// **Implementations must not throw**; a platform refusal is `false`. The
-  /// facade catches nothing, so an exception from here propagates out of
-  /// [FlutterStoreListing.openStoreListing], which returns an outcome rather
-  /// than throwing.
+  /// facade catches nothing, so an exception thrown here does *not* become an
+  /// outcome: it propagates out of [FlutterStoreListing.openStoreListing],
+  /// whose own contract is to report an outcome rather than throw. That is
+  /// what makes this rule absolute rather than a preference, and why the
+  /// bundled implementations each end in a bare `catch`.
   Future<bool> openStoreListing(Uri uri);
 }
 

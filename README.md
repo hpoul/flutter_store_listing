@@ -21,6 +21,15 @@ and opened a Google Play web page for a macOS bundle id. Its in-app prompt
 needs a view controller rather than a window scene and is deferred; when it
 arrives, `isInAppReviewSupported` going false→true on macOS breaks nobody.
 
+**The macOS listing is Dart-only, and `pubspec.yaml` declares no macOS
+platform**, so pub.dev badges this package Android and iOS. That is not an
+oversight: the macOS path builds an `apps.apple.com` URL and hands it to
+`url_launcher`, which declares macOS itself, so there is no native
+implementation here to register. Declaring the platform means shipping a
+`macos/` directory, and that lands with the native in-app prompt above rather
+than before it. Nothing to do on your side — add the dependency and the macOS
+listing works.
+
 Web and desktop report `unsupportedPlatform` rather than silently doing
 something wrong, which is the other half of the same fix.
 

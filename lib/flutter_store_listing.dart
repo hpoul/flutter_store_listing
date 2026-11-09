@@ -21,6 +21,18 @@
 /// ```
 library;
 
+// The bundled seam implementations, so that a consumer can *decorate* the
+// default behaviour — log a launch, confirm before leaving the app, dispatch
+// a prompt per platform — instead of reimplementing the Android store intent
+// to get at it. Leaving them unexported made the one documented extension
+// point unusable without copying library-private code, and made this
+// package's own tests import `src/`.
+export 'src/defaults.dart'
+    show
+        DefaultStoreListingLauncher,
+        PackageInfoStoreIdentity,
+        PreferredInAppReview,
+        StoreKitInAppReview;
 export 'src/outcomes.dart' show ReviewFallback, StoreListingOutcome;
 export 'src/seams.dart'
     show InAppReviewPrompt, StoreIdentity, StoreListingLauncher;

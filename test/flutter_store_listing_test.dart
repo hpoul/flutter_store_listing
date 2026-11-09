@@ -1,9 +1,9 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_store_listing/flutter_store_listing.dart';
-// Not exported: the default implementations are reachable through the seams,
-// but their mapping of the native replies is specified behaviour and belongs
-// under test.
-import 'package:flutter_store_listing/src/defaults.dart';
+// The one thing still not exported, because a consumer has no use for it: the
+// OS-name mapping behind `StorePlatform.current`.
+import 'package:flutter_store_listing/src/store_platform.dart'
+    show resolveStorePlatform;
 import 'package:flutter_test/flutter_test.dart';
 
 /// Records what the facade asked the launcher to do, so tests can assert on it
@@ -182,8 +182,11 @@ void main() {
 
   group('capability getters', () {
     test('are synchronous, so they are usable in build()', () {
-      // The point of the change: up to 1.4.0 both were Future<bool>, so a
-      // widget needed a FutureBuilder to learn a compile-time constant.
+      // What this asserts is the static type, and only that: up to 1.4.0 both
+      // were Future<bool>, so a widget needed a FutureBuilder to learn a
+      // compile-time constant. It therefore cannot fail for any code that
+      // compiles — a regression to Future<bool> is what it catches, and the
+      // answers themselves are asserted by the four tests below.
       expect(_subject().isStoreListingSupported, isA<bool>());
       expect(_subject().isInAppReviewSupported, isA<bool>());
     });
@@ -252,6 +255,36 @@ void main() {
         launcher.opened.single.toString(),
         'https://apps.apple.com/app/id1479297675',
       );
+    });
+
+    test('opens the Mac App Store listing on macOS', () async {
+      // The bug 2.0 exists to fix, in the one shape no other test here caught:
+      // up to 1.4.0 macOS fell into the Android branch and opened a Google Play
+      // web page built from an App Store id. Nothing put macOS through the URL
+      // switch, so changing its arm to `playStoreWebUri` passed all 54 tests.
+      final launcher = _FakeLauncher();
+      final outcome = await _subject(
+        platform: StorePlatform.macOS,
+        macAppStoreId: '1478552452',
+        launcher: launcher,
+      ).openStoreListing();
+
+      expect(outcome, StoreListingOutcome.storeListingOpened);
+      expect(
+        launcher.opened.single.toString(),
+        'https://apps.apple.com/app/id1478552452',
+      );
+    });
+
+    test('can open the write-review page on macOS', () async {
+      final launcher = _FakeLauncher();
+      await _subject(
+        platform: StorePlatform.macOS,
+        macAppStoreId: '1478552452',
+        launcher: launcher,
+      ).openStoreListing(writeReview: true);
+
+      expect(launcher.opened.single.queryParameters['action'], 'write-review');
     });
 
     test('defaults to the listing rather than the write-review page', () async {
@@ -442,14 +475,38 @@ void main() {
     });
 
     test(
-      'an unsupported platform says so rather than blaming the prompt',
+      'an unsupported platform with no prompt says so rather than blaming one',
       () async {
+        // No `inAppReview`: the default StoreKit prompt reports itself
+        // unavailable off iOS without touching a channel, so this is the real
+        // web and desktop shape — nothing here at all.
         final outcome = await _subject(
           platform: StorePlatform.unsupported,
-          inAppReview: _FakePrompt(available: false),
         ).requestReview(fallback: ReviewFallback.none);
 
         expect(outcome, StoreListingOutcome.unsupportedPlatform);
+      },
+    );
+
+    test(
+      'but a configured prompt on that platform is what gets reported',
+      () async {
+        // These two answers used to contradict each other: the getter counted
+        // the configured prompt while the ReviewFallback.none arm looked only
+        // at the platform and blamed it, so the same configuration was both
+        // "review is supported here" and "this platform has no app store at
+        // all". With a prompt configured, the store's absence is not what the
+        // caller asked about.
+        final subject = _subject(
+          platform: StorePlatform.unsupported,
+          inAppReview: _FakePrompt(available: false),
+        );
+
+        expect(subject.isInAppReviewSupported, isTrue);
+        expect(
+          await subject.requestReview(fallback: ReviewFallback.none),
+          StoreListingOutcome.inAppReviewUnavailable,
+        );
       },
     );
 
@@ -465,11 +522,105 @@ void main() {
     });
   });
 
+  group('a configured prompt is preferred, not substituted', () {
+    // `configure(inAppReview: …)` is global and documented as *the* Android
+    // extension point, so an app shipping on both stores makes that one call in
+    // main(). It used to replace StoreKit on iOS too, where a Play-backed
+    // prompt reports itself unavailable — so the user who should have seen the
+    // native rating dialog was sent to the App Store write-review page, while
+    // `isInAppReviewSupported` still answered true.
+    test(
+      'the built-in prompt runs when the configured one is unavailable',
+      () async {
+        final play = _FakePrompt(available: false);
+        final storeKit = _FakePrompt();
+        final outcome = await _subject(
+          platform: StorePlatform.iOS,
+          appStoreId: '1479297675',
+          inAppReview: PreferredInAppReview(preferred: play, builtIn: storeKit),
+        ).requestReview();
+
+        expect(outcome, StoreListingOutcome.inAppReviewRequested);
+        expect(play.requestCalls, 0);
+        expect(storeKit.requestCalls, 1);
+      },
+    );
+
+    test('the configured prompt wins wherever it is available', () async {
+      final play = _FakePrompt();
+      final storeKit = _FakePrompt();
+      final outcome = await _subject(
+        inAppReview: PreferredInAppReview(preferred: play, builtIn: storeKit),
+      ).requestReview();
+
+      expect(outcome, StoreListingOutcome.inAppReviewRequested);
+      expect(play.requestCalls, 1);
+      expect(storeKit.requestCalls, 0);
+    });
+
+    test('neither available runs the fallback', () async {
+      final launcher = _FakeLauncher();
+      final outcome = await _subject(
+        launcher: launcher,
+        inAppReview: PreferredInAppReview(
+          preferred: _FakePrompt(available: false),
+          builtIn: _FakePrompt(available: false),
+        ),
+      ).requestReview(fallback: ReviewFallback.none);
+
+      expect(outcome, StoreListingOutcome.inAppReviewUnavailable);
+      expect(launcher.opened, isEmpty);
+    });
+
+    test('configure on iOS keeps StoreKit reachable', () async {
+      // The bug end to end, through the real resolution rather than a
+      // hand-built composite. Mocking the channel is what makes the assertion
+      // sharp: before the fix the configured prompt's `false` ended the call
+      // and *no channel call happened at all*, so both versions returned a
+      // non-success outcome and only `calls` tells them apart.
+      TestWidgetsFlutterBinding.ensureInitialized();
+      const channel = MethodChannel('flutter_store_listing');
+      final calls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            return true;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+
+      FlutterStoreListing.configure(
+        platform: StorePlatform.iOS,
+        appStoreId: '1479297675',
+        inAppReview: _FakePrompt(available: false),
+      );
+
+      final outcome = await FlutterStoreListing.instance.requestReview(
+        fallback: ReviewFallback.none,
+      );
+
+      expect(calls, ['requestReview']);
+      expect(outcome, StoreListingOutcome.inAppReviewRequested);
+    });
+  });
+
   group('storeListingUri', () {
     test('describes what openStoreListing would open', () async {
       expect(
         (await _subject().storeListingUri()).toString(),
         'https://play.google.com/store/apps/details?id=design.codeux.authpass',
+      );
+    });
+
+    test('builds the App Store URL on macOS, not the Play one', () async {
+      expect(
+        (await _subject(
+          platform: StorePlatform.macOS,
+          macAppStoreId: '1478552452',
+        ).storeListingUri(writeReview: true)).toString(),
+        'https://apps.apple.com/app/id1478552452?action=write-review',
       );
     });
 
@@ -516,14 +667,37 @@ void main() {
     test('merges rather than replacing', () async {
       // The Play package's wiring is a second configure() call, so under
       // replace semantics it would wipe the ids set in main().
+      //
+      // Android rather than iOS for the prompt half: on iOS
+      // `isInAppReviewSupported` is true because of the platform, so it would
+      // answer true under replace semantics too and only the id assertion
+      // would carry any weight.
+      final prompt = _FakePrompt(available: false);
       FlutterStoreListing.configure(
-        platform: StorePlatform.iOS,
+        platform: StorePlatform.android,
+        androidPackageName: 'design.codeux.authpass',
         appStoreId: '1479297675',
       );
-      FlutterStoreListing.configure(inAppReview: _FakePrompt());
+      FlutterStoreListing.configure(inAppReview: prompt);
 
-      expect(await FlutterStoreListing.instance.storeId(), '1479297675');
+      expect(
+        await FlutterStoreListing.instance.storeId(),
+        'design.codeux.authpass',
+      );
       expect(FlutterStoreListing.instance.isInAppReviewSupported, isTrue);
+
+      // The App Store id from the first call also survived the second, which
+      // switching only the platform reads back.
+      FlutterStoreListing.configure(platform: StorePlatform.iOS);
+      expect(await FlutterStoreListing.instance.storeId(), '1479297675');
+
+      // And the prompt is the one actually asked, not merely counted by the
+      // getter above.
+      FlutterStoreListing.configure(platform: StorePlatform.android);
+      await FlutterStoreListing.instance.requestReview(
+        fallback: ReviewFallback.none,
+      );
+      expect(prompt.availableCalls, 1);
     });
 
     test('the last call wins for a value that is passed twice', () async {
@@ -540,11 +714,62 @@ void main() {
       FlutterStoreListing.configure(
         platform: StorePlatform.iOS,
         appStoreId: '1479297675',
+        macAppStoreId: '1478552452',
+        inAppReview: _FakePrompt(),
       );
       FlutterStoreListing.resetConfiguration();
 
+      // The platform has to be put back before anything is read, because reset
+      // clears that too and `_effectivePlatform` then falls through to the
+      // host. That made this the one host-dependent test in the file: on the
+      // `linux` CI runner an unsupported platform returns a null store id
+      // whether or not reset cleared the ids, so it passed on a
+      // resetConfiguration that did nothing at all, while catching a real
+      // failure on a `macos` developer machine.
+      FlutterStoreListing.configure(platform: StorePlatform.iOS);
       expect(await FlutterStoreListing.instance.storeId(), isNull);
+
+      FlutterStoreListing.configure(platform: StorePlatform.macOS);
+      expect(await FlutterStoreListing.instance.storeId(), isNull);
+
+      // Android, because `isInAppReviewSupported` is true on iOS from the
+      // platform alone and would not notice the prompt still being there.
+      FlutterStoreListing.configure(platform: StorePlatform.android);
+      expect(FlutterStoreListing.instance.isInAppReviewSupported, isFalse);
     });
+
+    test('an instance App Store id beats a configured macAppStoreId', () async {
+      // The two levels used to interleave. The Mac fallback chained to the
+      // *effective* App Store id, so the chain reached a global
+      // `macAppStoreId` before the id this instance was built with — an
+      // explicit argument losing to a default the caller never asked about,
+      // which is the opposite of what `.custom` documents.
+      FlutterStoreListing.configure(
+        appStoreId: 'configured-ios',
+        macAppStoreId: 'configured-mac',
+      );
+
+      expect(
+        await _subject(
+          platform: StorePlatform.macOS,
+          appStoreId: 'explicit-ios',
+        ).storeId(),
+        'explicit-ios',
+      );
+    });
+
+    test(
+      'a configured macAppStoreId still wins where nothing is explicit',
+      () async {
+        FlutterStoreListing.configure(
+          platform: StorePlatform.macOS,
+          appStoreId: 'configured-ios',
+          macAppStoreId: 'configured-mac',
+        );
+
+        expect(await FlutterStoreListing.instance.storeId(), 'configured-mac');
+      },
+    );
 
     test('a value given to .custom wins over configure', () async {
       FlutterStoreListing.configure(appStoreId: 'configured');
@@ -591,6 +816,23 @@ void main() {
     test('nothing handling it is a refusal', () async {
       mockNative((call) async => 'unavailable');
       expect(await launcher.openStoreListing(uri), isFalse);
+    });
+
+    test('a reply of the wrong type degrades instead of throwing', () async {
+      // The call used to be `invokeMethod<String>`, which casts the reply — so
+      // a native side answering `true` threw a TypeError past both catch
+      // clauses and out of a method whose contract forbids throwing. That is
+      // exactly the version-skew case the fall-back-on-unrecognised-reply
+      // branch exists for; an unrecognised reply *type* is an unrecognised
+      // reply. It falls through to url_launcher, unmocked here, hence false
+      // rather than a throw.
+      mockNative((call) async => true);
+      await expectLater(launcher.openStoreListing(uri), completion(isFalse));
+    });
+
+    test('an unrecognised string also degrades', () async {
+      mockNative((call) async => 'somethingNewFromAFutureKotlin');
+      await expectLater(launcher.openStoreListing(uri), completion(isFalse));
     });
 
     test(
@@ -743,10 +985,41 @@ void main() {
       }
     });
 
-    test('every value is reachable from the public API', () {
-      // §4's target. Each of these is asserted in a test above; this records
-      // the mapping so a new value cannot be added without a home.
+    test('has exactly the six values the suite asserts', () {
+      // A tripwire on the count, and nothing more than that: it cannot tell
+      // whether a value is reachable, and it still passes if one is renamed.
+      // What establishes reachability is that each of the six is asserted by a
+      // test above — inAppReviewRequested, storeListingOpened,
+      // unsupportedPlatform, inAppReviewUnavailable, storeIdUnavailable and
+      // launchRefused. Adding a seventh fails here, which is the prompt to
+      // give it a home.
       expect(StoreListingOutcome.values, hasLength(6));
+    });
+  });
+
+  group('the platform mapping behind StorePlatform.current', () {
+    // The original bug's own site, and the last part of the library the
+    // conditional import hid from the suite. `resolveStorePlatform` takes the
+    // OS name so the mapping itself can be asserted.
+    test('maps the three store platforms, and nothing else', () {
+      expect(resolveStorePlatform('android'), StorePlatform.android);
+      expect(resolveStorePlatform('ios'), StorePlatform.iOS);
+      expect(resolveStorePlatform('macos'), StorePlatform.macOS);
+      for (final os in ['linux', 'windows', 'fuchsia', 'web', '', 'iOS']) {
+        expect(resolveStorePlatform(os), StorePlatform.unsupported, reason: os);
+      }
+    });
+
+    test('nothing falls through to Android, which is what 1.4.0 did', () {
+      // Up to 1.4.0 the `else` branch *was* Android, so each of these built a
+      // Google Play URL — from an App Store id, on macOS.
+      for (final os in ['macos', 'linux', 'windows', 'web']) {
+        expect(
+          resolveStorePlatform(os),
+          isNot(StorePlatform.android),
+          reason: os,
+        );
+      }
     });
   });
 }
