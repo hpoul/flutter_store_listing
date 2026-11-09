@@ -8,6 +8,9 @@ analyzer:
     missing_return: warning
     # allow having TODOs in the code
     todo: ignore
+  exclude:
+    - build/**
+    - ios/**
   language:
     strict-casts: true
     strict-raw-types: true
