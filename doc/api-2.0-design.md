@@ -1,9 +1,13 @@
 # flutter_store_listing 2.0 — API design, for review
 
-Status: **revision 3 — nothing implemented, but implementable.** Every item
-the two design reviews raised is now applied below rather than listed as an
+Status: **revision 4 — nothing implemented, but implementable.** Every item
+the three design reviews raised is now applied below rather than listed as an
 open hole, and the four points that were genuinely the author's call have been
-decided. §8 logs revision 2; §9 logs revision 3.
+decided. §8 logs revision 2, §9 revision 3, §10 revision 4.
+
+The third review found one defect that outranks everything in §9: in 2.0 as
+revision 3 drew it, `FlutterStoreListing()` still compiles and silently stops
+being the configured instance. Both reviewers found it independently. See §5.
 
 The whole package is 303 lines of Dart, 72 of Swift and 183 of Kotlin, so an
 overhaul is cheap. The expensive part is the public API, because it is
@@ -38,15 +42,15 @@ against the code on `modernize-1.3.0`.
 
 | # | Problem | Consequence |
 |---|---|---|
-| 1 | `_isIOS` / `_isAndroid` come from a compile-time conditional import | No test can choose a platform. Five existing tests reach the Android branch only because the test VM says `macos` |
+| 1 | `_isIOS` / `_isAndroid` come from a compile-time conditional import | No test can choose a platform. **Four** existing tests reach the Android branch, only because the host is neither iOS nor Android — `macos` locally but `linux` in CI, which runs `flutter test` on `ubuntu-latest`. Revision 3 said five, and said `macos` as though it were the only case; the test file's own comments say the same |
 | 2 | `if (_isIOS) … else …` | web, macOS, Windows and Linux all fall into the **Android** branch. On macOS it opens a Play Store *web* page for a macOS bundle id — live today in AuthPass, which ships on macOS |
-| 3 | `getIosAppId()` does an **iTunes `/lookup` call** on every iOS `launchStoreListing()` | A network round trip to discover a build-time constant, and it fails offline. Worse, see 3a–3c |
+| 3 | `getIosAppId()` does an **iTunes `/lookup` call** on every iOS `launchStoreListing()` that did not pass `forceIosAppId` | A network round trip to discover a build-time constant, and it fails offline. Worse, see 3a–3c |
 | 3a | that lookup passes no `country`, so it searches the **US storefront only** | an app not published in the US gets `results: []` → `null` → permanent failure, not just an offline one |
 | 3b | `http` is used in **exactly one place** (`lib/flutter_store_listing.dart:5`, `:171`) — for that lookup | every consumer of a store-listing plugin carries an HTTP client in its dependency tree |
-| 3c | it has no `entity=macSoftware` | it cannot resolve a Mac app id at all, which matters the moment macOS lands (§3) |
+| 3c | it passes no `entity` at all | it cannot steer the lookup towards a Mac app id, which matters the moment macOS lands (§3). Revision 3 wrote `entity=macSoftware`; **that value does not exist** — Apple documents `software`, `iPadSoftware` and `desktopSoftware`. `bundleId` is not a documented `/lookup` parameter either, so the whole call is undocumented |
 | 4 | the lookup returns `String?`, and `getIosStoreListing` takes `String?` | `https://apps.apple.com/app/idnull?action=write-review` gets launched, and `true` returned |
 | 5 | every method returns bare `bool` | "unsupported platform", "could not resolve the id" and "the launcher refused" are indistinguishable from each other and, in case 4, from success |
-| 6 | `isSupported()` / `isSupportedNativeRequestReview()` are `Future<bool>` | an `await` and a method-channel round trip to learn a compile-time constant. Awkward in `build()` |
+| 6 | `isSupported()` / `isSupportedNativeRequestReview()` are `Future<bool>` | a needless `await` to learn a compile-time constant, awkward in `build()`. Only the second makes a channel round trip — `isSupported()` is `return _isAndroid \|\| _isIOS;` with no channel at all, which revision 3 conflated |
 | 7 | `launchStoreListing({bool iosWriteReview = true})` | a method named "open store listing" opens the **write-a-review** page by default |
 | 8 | `FlutterStoreListing()` is a factory over a static built with defaults | the injection seam on `customize()` cannot configure the instance everyone actually calls |
 | 9 | `_getPackageName()` eagerly interpolates four fields into a `finer` log on every call | log-string construction when logging is off. *Not* repeated channel work — `PackageInfo.fromPlatform()` memoizes in a static (verified, `package_info_plus` 10.2.2 `_fromPlatform`) |
@@ -54,13 +58,23 @@ against the code on `modernize-1.3.0`.
 | 11 | `results[0]['trackId'].toString()` | on a missing field this yields the **literal string `"null"`** (verified), so `/idnull` happens by a second route that a non-null-id check can never catch |
 | 12 | no seam for Android in-app review | the agreed `flutter_store_listing_play_review` package has nothing to plug into |
 | 13 | `(await _channel.invokeMethod<bool>(…)) as bool` at `:85`, `:88` | a null reply throws `_TypeError` (verified) rather than returning false |
-| 14 | ~~`canLaunchUrl('market://')` at `:136` gates the `market://` path~~ | **Fixed in 1.4.0.** url_launcher requires a `<queries>` manifest entry for this, "otherwise it will return false in most cases starting on Android 11", and 1.3.0 shipped no `android/` directory to put one in — so for an app targeting API 30+ without its own entry the branch was dead and the README documented a path that did not run. 1.4.0 replaced it with the documented store intent in Kotlin. Note the premise was narrower than revision 1 claimed: apps on a lower `targetSdk`, apps holding `QUERY_ALL_PACKAGES` and apps declaring the query did reach `market://` |
+| 14 | ~~`canLaunchUrl('market://')` at `:136` gates the `market://` path~~ | **Fixed in 1.4.0**, which replaced it with the documented store intent in Kotlin. **But the reason given for it has been wrong in all three revisions, in the same direction every time** — see §10. Android makes "the app that installed your app" visible automatically, with no `<queries>` entry and whatever the `targetSdk`, so on any Play-installed device `com.android.vending` was visible and the probe was *not* filtered. Revision 3's exception list (lower `targetSdk`, `QUERY_ALL_PACKAGES`, a declared query) omits the majority case. What survives: `setPackage` is not expressible through `url_launcher`, and `market://` is gone from Google's documented *store-listing* formats — and those, not a dead branch, are why the native route won |
 
 Items 1, 2, 3 and 5 are the ones worth redesigning for. The rest fall out.
 
 Item 14 is the only one 1.4.0 closed. Items 2, 3, 4, 10, 11 and 13 are all
-still live in the published package — the `else` branch still catches macOS,
+still live in the released package — the `else` branch still catches macOS,
 Windows, Linux and web, and the iTunes lookup is still there.
+
+**1.4.0 is on `master` but not published to pub.dev**, and item 14's wrong
+premise is repeated in `README.md` and in the 1.4.0 `CHANGELOG.md` entry. Those
+two are consumer-facing and fixable before the release goes out; this document
+is not blocking on them, but they should not ship as they stand. The *conclusion*
+in the CHANGELOG — "for most users this is the behaviour they already had" — is
+right, and more right than its reasoning: a Play-installed app on 1.3.0 reached
+`market://details?id=…`, which the Play Store app handles, and 1.4.0 sends the
+https URL to that same app. Nearly every user lands in the same place by a
+different route. It is the explanation, not the behaviour, that needs correcting.
 
 ---
 
@@ -82,8 +96,8 @@ enum StoreListingOutcome {
   unsupportedPlatform,
 
   /// This platform has a store, but no in-app review prompt — and you asked
-  /// for no fallback. Android without `flutter_store_listing_play_review`, or
-  /// a prompt that reported itself unavailable at request time.
+  /// for no fallback. Android with no [InAppReviewPrompt] configured, or a
+  /// prompt that reported itself unavailable at request time.
   inAppReviewUnavailable,
 
   /// The store id for this platform is not known, so no URL could be built.
@@ -108,13 +122,37 @@ Reporting "this platform has no app store" on Android — where the store listin
 works perfectly — would reintroduce exactly the conflation item 5 exists to
 remove, and it is the path both known consumers take.
 
-**Decided: new values may arrive in minor versions.** Dart 3 makes a
-non-exhaustive switch on an enum a hard error, so a seventh outcome in 2.1
-would break every consumer who switched exhaustively. Rather than freeze the
-set for all of 2.x, the dartdoc on the enum will say that values may be added
-in a minor release and that consumers should keep a `default` clause, and the
-CHANGELOG will repeat it at 2.0.0. `ReviewFallback` is an input, so it has no
-such problem and can be treated as closed.
+**Decided: new values may arrive in minor versions — and that is a breaking
+change by Dart's own rules, stated rather than glossed.** A non-exhaustive
+switch *statement* over an enum is a compile-time error
+(`non_exhaustive_switch_statement`), so a seventh outcome in 2.1 stops a
+consumer who switched exhaustively from compiling, and a dartdoc note does not
+make that minor. The real choice is between freezing the set for all of 2.x and
+accepting that a consumer pinning `^2.0.0` can be broken by a minor. This takes
+the second, because an outcome set that cannot grow is worse than one that
+grows with a documented escape hatch — but the CHANGELOG says so in those
+words instead of implying the additions are free.
+
+**The escape hatch has two forms, and revision 3 gave the one that does not
+always work.** `default` is valid in a switch *statement*; in a switch
+*expression* it is an error — `default_in_switch_expression`, "A switch
+expression may not use the `default` keyword. Try replacing `default` with
+`_`." Both diagnostics above were confirmed by running `dart analyze` over a
+probe, not recalled. So the dartdoc and the CHANGELOG give both: a `default`
+clause in a statement, a wildcard `_` case in an expression. Revision 3's
+advice would have been a syntax error in the construct consumers increasingly
+write.
+
+**The policy has to cover all three enums.** Revision 3 said `ReviewFallback`
+"is an input, so it has no such problem": Dart's exhaustiveness error does not
+care which way a value flows, and a consumer switching over a persisted
+`ReviewFallback` — a settings radio group, a log formatter — breaks
+identically. Direction changes the likelihood, not the breakage. Both
+`ReviewFallback` and `StorePlatform` are nonetheless **closed**: three
+fallbacks exhaust the choice, and §5 tells the example to
+`switch (StorePlatform.current)`, so growing that one would break the very
+pattern this document recommends. If a desktop store ever justifies a
+`StorePlatform` value, it is a major.
 
 **Deliberately not distinguished: which app opened the listing.** Since 1.4.0
 the Android native layer reports whether the Play Store app took the URL or
@@ -188,8 +226,21 @@ what made the whole package report as WebAssembly-incompatible before 1.3.0.
 
 ```dart
 class FlutterStoreListing {
-  /// The normal constructor, for an app that would rather pass configuration
-  /// than set it globally.
+  // No unnamed constructor, deliberately. In 1.4.0 `FlutterStoreListing()` is
+  // a factory returning the shared instance; a generative one here would keep
+  // compiling for every existing caller and quietly stop being configured.
+  // See §5, first silent breakage. Use `instance`, or `.custom` to build your
+  // own. The private one is what `instance` is made from.
+  FlutterStoreListing._shared();
+
+  /// The shared instance, so UI code can call
+  /// `FlutterStoreListing.instance.requestReview()` without threading
+  /// configuration through it.
+  ///
+  /// Configure it with [configure]; it is never replaced.
+  static final FlutterStoreListing instance = FlutterStoreListing._shared();
+
+  /// Configures [instance]. Call in `main()`.
   ///
   /// [appStoreId] is the numeric App Store id — for
   /// `https://apps.apple.com/app/id1479297675` it is `1479297675`. It is a
@@ -201,32 +252,29 @@ class FlutterStoreListing {
   /// universal purchase. Apps with separate iOS and Mac SKUs have two ids.
   ///
   /// [androidPackageName] defaults to the running app's own package name.
-  FlutterStoreListing({
-    String? appStoreId,
-    String? macAppStoreId,
-    String? androidPackageName,
-    InAppReviewPrompt? inAppReview,
-  });
-
-  /// The shared instance, so UI code can call
-  /// `FlutterStoreListing.instance.requestReview()` without threading
-  /// configuration through it.
-  ///
-  /// Never replaced — configure what is beneath it with [configure].
-  static final FlutterStoreListing instance = FlutterStoreListing._shared();
-
-  /// Configures [instance]. Call once, in `main()`.
   ///
   /// [instance] reads this configuration on each call rather than capturing it,
   /// so a reference taken before this runs — a `State` field initialiser, say —
-  /// is configured afterwards all the same. Calling it twice is allowed and the
-  /// last call wins; it is global state, and pretending otherwise would only
-  /// add a failure mode.
+  /// is configured afterwards all the same.
+  ///
+  /// **Merges; it does not replace.** An argument left out keeps its current
+  /// value, so an app's own `configure(appStoreId: …)` in `main()` and a later
+  /// `configure(inAppReview: PlayInAppReviewPrompt())` compose, instead of the
+  /// second wiping the ids and landing back on
+  /// [StoreListingOutcome.storeIdUnavailable]. Nothing clears a value back to
+  /// unset except [resetConfiguration]; to change one, pass the new value.
   static void configure({
     String? appStoreId,
     String? macAppStoreId,
     String? androidPackageName,
     InAppReviewPrompt? inAppReview,
+    // The seams too, so that `instance` — the object every consumer actually
+    // calls — is reachable from a test. Without them §4's promise holds only
+    // for `.custom`, and the per-call resolution below would be the one novel
+    // part of this design with no test seam at all.
+    StorePlatform? platform,
+    StoreIdentity? identity,
+    StoreListingLauncher? launcher,
   });
 
   /// Drops whatever [configure] set, so one test cannot leak into the next.
@@ -236,8 +284,10 @@ class FlutterStoreListing {
   /// Every external dependency injectable, for tests and unusual hosts.
   ///
   /// The seams are nullable rather than defaulted because a Dart default must
-  /// be a compile-time constant, and `StorePlatform.current` is a getter. Each
-  /// null is resolved to the real implementation in the initializer list.
+  /// be a compile-time constant, and `StorePlatform.current` is a getter. A
+  /// value given here wins over [configure]; a null falls through to it, and
+  /// then to the real implementation — resolved per call, never in an
+  /// initializer list.
   FlutterStoreListing.custom({
     String? appStoreId,
     String? macAppStoreId,
@@ -253,7 +303,13 @@ class FlutterStoreListing {
   /// False on Apple platforms with no store id configured, where
   /// [openStoreListing] would report
   /// [StoreListingOutcome.storeIdUnavailable]. So UI that gates a "Rate this
-  /// app" row on this getter cannot end up rendering one that does nothing.
+  /// app" row on this getter does not render one that does nothing.
+  ///
+  /// On Android it assumes the package name resolves, which it does for the
+  /// default [StoreIdentity]. That assumption is the one gap in a synchronous
+  /// answer: a [StoreIdentity] reporting null — which the interface permits —
+  /// would still give [StoreListingOutcome.storeIdUnavailable] from
+  /// [openStoreListing] while this getter said true.
   bool get isStoreListingSupported;
 
   /// Whether this platform can show an in-app review prompt at all. Whether
@@ -273,6 +329,11 @@ class FlutterStoreListing {
   /// The URL [openStoreListing] would open. On Android that is the https
   /// `play.google.com` one: restricting the intent's package is what sends it
   /// to the Play Store app, so there is only ever one URL to describe.
+  ///
+  /// [writeReview] is Apple-only: Play has no write-review deep link, so on
+  /// Android it is ignored and the plain listing comes back. The same is true
+  /// of [openStoreListing], and both doc comments say so, because these are
+  /// the two places a caller looks.
   ///
   /// Null when this platform has no store, or the store id is unknown —
   /// [openStoreListing] distinguishes those two; this convenience for building
@@ -322,6 +383,33 @@ Deliberate choices:
   revision 2's reviewer proposed — a setter that throws once the default has
   been handed out. There is nothing left to make loud.
 
+  **The mechanism, spelled out, because revision 3 asserted the behaviour and
+  then described one that contradicts it.** Its `.custom` doc comment said each
+  null is "resolved to the real implementation in the initializer list", which
+  is the single shape that cannot work: a `_shared()` instance is built lazily
+  on first touch, so an initializer list would freeze whatever defaults existed
+  at that moment and `configure()` could never reach it. An implementer taking
+  the obvious reading — final fields — would have reintroduced exactly the
+  capture-before-`configure()` bug this bullet says is impossible.
+
+  So: every configurable value is a nullable field, and every read goes through
+  an accessor that resolves at call time.
+
+  ```dart
+  final String? _appStoreId;             // what this instance was given
+  static String? _configuredAppStoreId;  // what configure() set
+
+  String? get _effectiveAppStoreId => _appStoreId ?? _configuredAppStoreId;
+
+  StoreListingLauncher get _effectiveLauncher =>
+      _launcher ??
+      _configuredLauncher ??
+      _defaultLauncherFor(_effectivePlatform);
+  ```
+
+  `.custom` still behaves as advertised — a value it was given wins, because it
+  is the left operand — and `instance` simply has nulls in every field.
+
 * **`storeId()` on macOS returns `macAppStoreId`, falling back to
   `appStoreId` — decided.** An app with a universal purchase passes one id and
   it keeps working; an app with separate SKUs passes two and gets the right one
@@ -340,9 +428,12 @@ Deliberate choices:
   the https and the `market://` URL without saying which `openStoreListing`
   used. 1.4.0 answered it: the https URL, with the intent's package restricted
   to the Play Store app, which is what Google's own guide documents and
-  `url_launcher` cannot express. `market://` is not in Google's documented link
-  formats any more, so there is no builder to publish for it — and a published
-  `Uri` builder is API that cannot be withdrawn.
+  `url_launcher` cannot express. `market://` is gone from Google's documented
+  *store-listing* formats, so there is no builder to publish for it — and a
+  published `Uri` builder is API that cannot be withdrawn. It is not gone from
+  the guide altogether: `market://launch?id=…` is still documented for Play
+  Instant, which this package does not do. `README.md` draws that line
+  correctly; revision 3 said "documented link formats" and overshot.
 * **`writeReview` defaults to `false`** on `openStoreListing`, inverting
   today's default. A method named for the listing should open the listing.
   `requestReview`'s *fallback* still defaults to the write-review page.
@@ -405,13 +496,22 @@ no test can reach the iOS prompt today and §4's "every branch reachable from
 same interface the Play package implements also means there is exactly one
 contract to honour rather than one interface and one special case.
 
-`InAppReviewPrompt` is the extension point item 12 wanted:
-`flutter_store_listing_play_review` ships a `PlayInAppReviewPrompt` and you
-pass it to `FlutterStoreListing.configure()` once, so the proprietary Play
-dependency stays out of this package and out of F-Droid builds. **Its contract
-says implementations must not throw** because the first implementor is that
-package and Play's `ReviewManager` does throw — an interface whose only known
-implementation violates an unstated rule is not a contract.
+`InAppReviewPrompt` is the extension point item 12 wanted: a
+`flutter_store_listing_play_review` package *would* ship a
+`PlayInAppReviewPrompt` that you pass to `FlutterStoreListing.configure()`
+once, so the proprietary Play dependency stays out of this package and out of
+F-Droid builds. **No such package is published** — `pubspec.yaml` says so in as
+many words, and tells us not to point users at one — so both this document and
+the committed dartdoc describe the seam instead of naming a package that does
+not exist.
+
+**Its contract says implementations must not throw**, because the first
+implementor will be that package and Play's review flow reports failure rather
+than returning cleanly — an interface whose only expected implementation
+violates an unstated rule is not a contract. (Revision 3 said Play's
+`ReviewManager` "does throw"; that it throws *synchronously* is not confirmed
+from Google's documentation, which surfaces failure through a `Task`. The
+contract does not depend on which way it fails.)
 
 `StoreIdentity` shrank to one method, because with the lookup gone the App
 Store id is simply a constructor argument.
@@ -426,8 +526,15 @@ both, so this is settled explicitly:
   `storeListingOpened`, `unavailable` → `launchRefused`. Its `no_activity`
   error is `launchRefused` as well, and specifically **not** a route to
   url_launcher: url_launcher is `ActivityAware` too and is detached in the same
-  window, so its own `ensureActivity` throws. 1.4.0 shipped a comment claiming
-  otherwise and the review caught it.
+  window, so its own `ensureActivity` throws. **This is a change to the Dart
+  dispatch, not a mapping of it.** 1.4.0 catches `PlatformException`
+  wholesale, returns null, and the caller *does* then call `urlLaunch` — which
+  throws and is caught, so the outcome is the same `false` by a longer route.
+  2.0 has to tell `MissingPluginException` (fall back) from `PlatformException`
+  (do not). The Kotlin comment at `FlutterStoreListingPlugin.kt:96-100` asserts
+  the Dart side already distinguishes them; it does not, so that comment is
+  wrong in shipped 1.4.0 — the second comment in this area to claim a Dart
+  behaviour that was not there.
 * `MissingPluginException` → **not** `unsupportedPlatform`. Revision 2 had this
   backwards. Once the platform is a value the channel is never called on a
   platform that has no store, so this exception can only mean the plugin failed
@@ -436,14 +543,31 @@ both, so this is settled explicitly:
   store at all" about an iPhone is false, and it suppresses the store-listing
   fallback that would still have worked. So: from the review prompt it means
   the prompt is unavailable and the `ReviewFallback` runs; from the launcher it
-  falls back to url_launcher. 1.4.0 already behaves this way.
+  falls back to url_launcher. **1.4.0 behaves this way for the launcher only**,
+  though revision 3 claimed both: `_invokeRequestReview()` has no `try`/`catch`
+  at all, so a `MissingPluginException` from the review channel propagates out
+  of `launchRequestReview()` today and no fallback runs. The review-prompt half
+  is new work in 2.0, not a description of what already happens.
 * `invokeMethod<bool>` returning null → false, not a `_TypeError` (item 13).
 * An unrecognised reply from the native side falls back rather than reporting
   failure, so a version skew between Dart and native degrades instead of
   showing the user nothing.
-* Nothing else is caught. A bug in a caller-supplied `StoreListingLauncher` or
-  `InAppReviewPrompt` propagates — which is the other half of why both
-  contracts say implementations must not throw.
+* `InAppReviewPrompt.isAvailable()` false, or `requestReview()` false → the
+  `ReviewFallback` runs, and under `ReviewFallback.none` the outcome is
+  `inAppReviewUnavailable`. This is exactly the signal §6's Swift scene fix
+  creates, so it gets a mapping of its own rather than being left to §2.1's
+  parenthetical.
+* **Which layer catches all of this: the bundled implementations, not the
+  facade.** Every mapping above is the documented behaviour of the
+  `StoreKitInAppReview` and the default `StoreListingLauncher` that ship in
+  this package. The facade itself catches nothing, so a *caller-supplied*
+  `StoreListingLauncher` or `InAppReviewPrompt` that throws propagates out of
+  `requestReview()` — which is the other half of why both contracts say
+  implementations must not throw. Revision 3 put both rules in one list without
+  saying they apply at different layers, and they read as a flat contradiction:
+  an implementer would either wrap the facade in `try`/`catch`, violating the
+  rule below, or honour it and ship an outcome-returning API that throws on the
+  single most likely third-party failure.
 
 ---
 
@@ -458,10 +582,19 @@ both, so this is settled explicitly:
 
 **macOS splits in two, and the halves have very different costs.**
 
-The **listing** is nearly free: the same `apps.apple.com/app/id…` URL,
-`url_launcher` hands it to the Mac App Store, no native code, and
-`StorePlatform.macOS` is already in the enum. It also fixes a live bug in
-AuthPass, which today opens a Google Play web page on macOS. **In for 2.0.**
+The **listing** is nearly free: the same `apps.apple.com/app/id…` URL, no
+native code, and `StorePlatform.macOS` is already in the enum. It also fixes a
+live bug in AuthPass, which today opens a Google Play web page on macOS. **In
+for 2.0.**
+
+**One unverified premise here is load-bearing.** That `url_launcher` hands that
+URL to the Mac App Store *app* is not confirmed from Apple documentation —
+`url_launcher_macos` opens through `NSWorkspace`, which goes to the default
+https handler, i.e. a browser, unless the store app claims the domain. Check it
+on a Mac before implementing. If it opens a browser, macOS support is still
+worth shipping — a web listing beats a Google Play page for a Mac bundle id —
+but "nearly free" and one `appStoreUri()` serving both Apple platforms are what
+need revisiting, not the decision itself.
 
 The **native prompt** needs a second SPM target, a podspec platform, an
 `NSViewController` instead of a `UIWindowScene`, and a macOS example.
@@ -496,6 +629,14 @@ The point of §2.3 and §2.5 is that afterwards every branch is reachable from
 Target: every `StoreListingOutcome` value asserted at least once, and no test
 whose result depends on what the host VM reports.
 
+That holds for `instance` as well as for `.custom`, but only because §2.4's
+`configure()` carries the three seams. Without them, the per-call resolution —
+the novel part of this design, and the code path every consumer runs — would be
+the one thing no test could drive, because `instance` would always take
+`StorePlatform.current` from the host. Revision 3's `configure()` had only the
+four configuration values, so §4's promise covered everything except the part
+most likely to be got wrong.
+
 What stays out of reach of `flutter test`, by nature: the Swift and Kotlin
 sources themselves. Those keep their own tests — the Android module already has
 11 under Robolectric as of 1.4.0 — and the Dart suite covers the mapping from
@@ -505,7 +646,9 @@ their replies, not the replies.
 
 ## 5. Migration
 
-Complete, for both known consumers.
+Complete for both known consumers, and for this repository. Revision 3 claimed
+"complete" and was missing public API anyway; the renames table's baseline is
+now **1.4.0**, which is how a member added in 1.4.0 came to be overlooked.
 
 ### AuthPass
 
@@ -536,20 +679,42 @@ Complete, for both known consumers.
 +     .requestReview(fallback: ReviewFallback.none)).isSuccess;
 ```
 
-**The `appStoreId` line is the one thing in this document that breaks a
-consumer silently if missed**: everything else is a compile error, that is a
-runtime `storeIdUnavailable`. Verify the id before migrating. A debug-mode
-`assert` on the Apple path (§2.4) closes most of this gap — release builds
-still report the outcome, because an app may legitimately run unconfigured, but
-nobody discovers it in production first.
+**There are three silent breakages, not one.** Revision 2 claimed one, revision
+3 found a second and congratulated itself in those terms, and the third — found
+independently by both reviewers of revision 3 — is the worst of them.
 
-**A second silent change, which revision 2 missed while claiming there was
-only one.** On macOS, Windows, Linux and web, `launchStoreListing()` today
-returns `true` after opening a Google Play web page. In 2.0 those platforms
-report `unsupportedPlatform`, so the same call site flips to
-`isSuccess == false`. That is the bug in item 2 being fixed, but a caller that
-branches on the result sees the change without a compile error — and AuthPass
-ships on macOS.
+**1. `FlutterStoreListing()` would silently stop being the configured
+instance.** Today it is a `factory` returning the shared `_instance`
+(`lib/flutter_store_listing.dart:31`). Revision 3's §2.4 made the unnamed
+constructor *generative*, with every argument optional and named — so
+`FlutterStoreListing()` would still compile, still analyse clean, and hand back
+a fresh instance that `configure()` had never touched. A consumer who migrated
+mechanically, doing the renames the compiler forces and leaving the
+construction alone, would lose every configured value: `storeIdUnavailable` on
+Apple platforms, and an `InAppReviewPrompt` simply absent on Android, which the
+§2.4 assert does not cover. Every migration snippet in this section changes
+that line, and it is the load-bearing one.
+
+> **Decided: 2.0 publishes no unnamed constructor.** `.instance` for the shared
+> one, `.custom` to build your own. That turns this from a silent breakage into
+> a compile error, which is the only reason the other two are tolerable. A
+> `@Deprecated` unnamed constructor was the alternative and is worse: it still
+> compiles, so the failure still reaches a user, just with a warning nobody
+> reads in a release build.
+
+**2. `appStoreId` must be configured.** Missing it is a runtime
+`storeIdUnavailable`, not a compile error, because the iTunes lookup AuthPass
+relies on today is gone. Verify the id before migrating. A debug-mode `assert`
+on the Apple path (§2.4) closes most of this gap — release builds still report
+the outcome, because an app may legitimately run unconfigured, but nobody
+discovers it in production first.
+
+**3. Desktop and web flip from `true` to false.** On macOS, Windows, Linux and
+web, `launchStoreListing()` today returns `true` after opening a Google Play
+web page. In 2.0 those platforms report `unsupportedPlatform`, so the same call
+site flips to `isSuccess == false`. That is the bug in item 2 being fixed, but a
+caller that branches on the result sees the change without a compile error —
+and AuthPass ships on macOS.
 
 ### example/lib/main.dart
 
@@ -595,20 +760,36 @@ the API and were not mentioned:
   does nothing on Android" sentence in favour of
   `ReviewFallback.none`.
 * **`test/flutter_store_listing_test.dart` is a wholesale rewrite**, not an
-  edit. Every test constructs through `customize(…)`, and the two that assert
-  URL strings become `Uri` assertions. This is not a cost — it is the point of
-  §4 — but it is work the migration section should name.
+  edit. Ten of its twelve tests construct through `customize(…)` and two
+  through the `FlutterStoreListing()` factory (`:126`, `:132`) — which §2.4
+  removes, so those two change shape rather than just names. Seven string
+  assertions become `Uri` assertions: three on builder output (`:46`, `:53`,
+  `:60`) and four on what the recording launcher was handed (`:84`, `:102`,
+  `:116`, `:159`). Revision 3 said "every test" and "the two that assert URL
+  strings"; the point of this bullet is to size the rewrite, so the numbers
+  matter.
+* **`lib/src/platform_os_web.dart:8-10`** carries dartdoc referencing
+  `[FlutterStoreListing.isSupported]`,
+  `[FlutterStoreListing.isSupportedNativeRequestReview]`, `launchRequestReview`
+  and `launchStoreListing`. All four names go away, leaving dangling references
+  in a file revision 3 never mentioned; `platform_os_io.dart` needs the same
+  read.
+* **`example/lib/main.dart:60`** uses a bare collection-`if`. The rewrite is
+  the moment to make it a spread block, per this project's control-flow rule —
+  `flutter analyze` never reports the collection form, so it will not be caught
+  for us.
 * **`test/flutter_store_listing_test.dart:51`** asserts the `itms-apps://`
   form, which §7 lists as unverified. 2.0 has no scheme parameter, so the
   assertion goes with it rather than being ported.
 
 ### Renames at a glance
 
-| 1.3.0 | 2.0.0 |
+| 1.4.0 | 2.0.0 |
 |---|---|
+| `FlutterStoreListing()` — a `factory` returning the shared instance | `FlutterStoreListing.instance`. **No unnamed constructor is published**, so this is a compile error rather than the silent breakage described above |
 | `FlutterStoreListing.customize(…)` | `FlutterStoreListing.custom(…)` |
-| `forceIosAppId` | `appStoreId` |
-| `forceAndroidPackageName` | `androidPackageName` |
+| `forceIosAppId` — a constructor argument **and** a public final field | `appStoreId`, an argument only; no public field reads it back |
+| `forceAndroidPackageName` — likewise a public final field | `androidPackageName`, likewise argument-only |
 | `isSupported()` | `isStoreListingSupported` (sync) |
 | `isSupportedNativeRequestReview()` | `isInAppReviewSupported` (sync) |
 | `launchStoreListing({iosWriteReview})` | `openStoreListing({writeReview})`, default flipped |
@@ -616,7 +797,8 @@ the API and were not mentioned:
 | `getIosAppId()`, `getAndroidPackageName()` | `storeId()` |
 | `getIosStoreListing()`, `getAndroidStoreListing()` | `appStoreUri()`, `playStoreWebUri()` (static, `Uri`) |
 | `urlCanLaunch`, `defaultUrlCanLaunch` | — (unused since 1.4.0, removed) |
-| `urlLaunch` | `StoreListingLauncher` |
+| `urlLaunch`, `defaultUrlLaunch` | `StoreListingLauncher` |
+| `playStorePackageName` — public `static const`, added in 1.4.0 and advertised in its CHANGELOG as "exposed for callers building their own intents" | — removed. The package name moves inside the default `StoreListingLauncher`, the only thing that needs it |
 | — | `FlutterStoreListing.configure()`, `storeListingUri()` |
 
 The CHANGELOG will carry this table and the AuthPass warning verbatim.
@@ -658,16 +840,32 @@ possibly-background scene. Shipping 2.0 with `inAppReviewRequested` still able
 to lie would undercut the whole point of §2.1, so: when there is no
 foreground-active scene, return false so the fallback runs.
 
-**It is one line** — deleting `?? scenes.first` — not the three revision 2
-estimated. But it has a user-visible consequence that belongs in the CHANGELOG
-rather than in a list of internal fixes: with no foreground-active scene, iOS
-now runs the `ReviewFallback`, so the default behaviour sends the user to the
-App Store write-review page where 1.4.0 showed them nothing at all.
+**It is one line of code** — deleting `?? scenes.first` — not the three
+revision 2 estimated, plus two doc comments the deletion makes wrong:
+`activeWindowScene()`'s "otherwise any connected window scene"
+(`FlutterStoreListingPlugin.swift:64-66`) and `requestReview`'s "Reports
+`false` only when there is no window scene to present in" (`:27-30`). Both
+describe the behaviour being removed.
 
-* **No change to the Android implementation either.** It shipped in 1.4.0,
+It also has a user-visible consequence that belongs in the CHANGELOG rather
+than in a list of internal fixes: with no foreground-active scene, iOS now runs
+the `ReviewFallback`, so the default behaviour sends the user to the App Store
+write-review page where 1.4.0 showed them nothing at all. §2.6 carries the
+mapping that makes that work.
+
+And since §6 deletes the `isSupportedRequestReview` channel case,
+`StoreKitInAppReview.isAvailable()` answers from the platform value and the iOS
+version alone — true on iOS, false elsewhere — leaving scene availability to
+`requestReview()`, which is the only place it can honestly be known.
+
+* **No change to the Android *Kotlin* implementation.** It shipped in 1.4.0,
   was reviewed, and the two-attempt intent is exactly what 2.0 needs behind
-  `StoreListingLauncher`. The only Dart-side change is that its reply is mapped
-  to a `StoreListingOutcome` instead of a `bool`.
+  `StoreListingLauncher`. The Dart side is more than a reply mapping, though,
+  which is what revision 3 said: §2.6 requires `no_activity` to stop routing to
+  url_launcher, so `MissingPluginException` and `PlatformException` have to be
+  caught separately instead of both returning null. Small, but it is a
+  behaviour change rather than a translation — and it also makes a Kotlin
+  comment true that is wrong today.
 
 ---
 
@@ -678,11 +876,16 @@ App Store write-review page where 1.4.0 showed them nothing at all.
 **Resolved:** whether `itms-apps://apps.apple.com/app/id…` opens the App Store
 app was listed as needing a device. It does not need one, because the design
 had already answered it: `appStoreUri()` takes no scheme parameter, so 2.0
-never emits `itms-apps://` and there is nothing to verify. The https URL opens
-the App Store app on iOS regardless. What survives is a cleanup —
-`test/flutter_store_listing_test.dart:51` asserts the `itms-apps` form today,
-so that scheme is "tested" without ever having been verified, which is how it
-survived this long. The assertion goes with the parameter.
+never emits `itms-apps://` and there is nothing to verify. What survives is a
+cleanup — `test/flutter_store_listing_test.dart:51` asserts the `itms-apps`
+form today, so that scheme is "tested" without ever having been verified, which
+is how it survived this long. The assertion goes with the parameter.
+
+Revision 3 also added "The https URL opens the App Store app on iOS
+regardless", which both reviewers flagged as asserted without a source. It is
+withdrawn rather than defended, because the resolution above rests on the
+parameter's absence and does not need it. The same question for **macOS** is
+live and load-bearing — see §3.
 
 **Resolved:** which URL Android opens, revision 2's one blocking gap. 1.4.0
 answered it in code — the https URL with the intent's package restricted — and
@@ -825,3 +1028,119 @@ ahead of this design.
 `ArgumentError.checkNotNull(appStoreId, …)` in `in_app_review`. That line is
 not in the version of `in_app_review.dart` checked here, so nothing above rests
 on it. The argument for the debug assert (E) stands on its own.
+
+---
+
+## 10. Review log — what changed in revision 4
+
+Revision 3 went to two independent reviewers at once: one on the document's
+internal consistency and whether the API is sound as drawn, one fact-checking
+every claim against the 1.4.0 code and primary platform documentation. Both
+read the whole document without seeing the other's work.
+
+**They found the same top defect independently**, which is the strongest signal
+in either report.
+
+### The one that changes the API
+
+**`FlutterStoreListing()` would have stopped being the configured instance,
+silently.** Today it is a `factory` returning the shared instance; revision 3
+turned the unnamed constructor generative with all-optional arguments, so it
+kept compiling and started returning an unconfigured object. A consumer doing
+only the renames the compiler forces would have shipped
+`storeIdUnavailable` on Apple and a missing `InAppReviewPrompt` on Android.
+**2.0 now publishes no unnamed constructor at all** (§5), which converts it to
+a compile error. This is the third silent breakage in a section that claimed
+one, then two.
+
+### Wrong as designed
+
+* **The per-call configuration mechanism did not exist, and the one described
+  contradicted it.** `.custom`'s doc comment said nulls resolve "in the
+  initializer list" — the single shape under which `configure()` can never
+  reach `instance`. An implementer would have used final fields and
+  reintroduced the capture bug §2.4 says is impossible. §2.4 now gives the
+  accessor pattern in code.
+* **`configure()` did not say whether it merges or replaces**, and §2.5's own
+  Play wiring is a second `configure()` call. Under replace, it would have
+  wiped the ids. Now specified as merge.
+* **`configure()` exposed no seams**, so nothing could test `instance` — the
+  object every consumer calls, running the one novel path. It now takes all
+  three (§2.4, §4).
+* **§2.6's mappings and its "nothing else is caught" rule contradicted each
+  other** for a third-party prompt throwing `MissingPluginException`, which is
+  that seam's most likely failure. Split by layer: bundled implementations map,
+  the facade catches nothing.
+* **`isStoreListingSupported` was still not honest on Android** — finding B
+  from revision 3 was only half fixed. The assumption is now in the doc
+  comment, not only in the rationale.
+* **The enum-evolution advice was a syntax error** in switch *expressions*,
+  where `default` is not permitted (`default_in_switch_expression` — confirmed
+  by running the analyzer, not recalled). Both forms are now given, the policy
+  covers all three enums, and adding a value is named as breaking rather than
+  implied to be free.
+
+### Claims that were wrong
+
+Six of these, which is the fourth such round in this work. The pattern is
+stable: the structural decisions survive review; the confident sentences around
+them do not.
+
+* **Item 14's premise is wrong for the third time, in the same direction.**
+  Android makes "the app that installed your app" automatically visible, so on
+  any Play-installed device the `market://` probe was *not* filtered and the
+  branch was not dead. Revision 1 was too broad, revision 3 narrowed it and
+  still omitted the majority case. **This same reasoning is shipped in
+  `README.md` and the 1.4.0 `CHANGELOG.md`**, which are consumer-facing and not
+  yet published — worth correcting before the release goes out. The CHANGELOG's
+  conclusion is right and its explanation is not.
+* **"1.4.0 already behaves this way" for `MissingPluginException`** — true of
+  the launcher, false of the review prompt, which has no `try`/`catch` at all.
+  The claim would have cost an implementer the handler 2.0 needs.
+* **`no_activity` is a Dart-side change, not a mapping** — 1.4.0 does route it
+  to url_launcher. §6's "the only Dart-side change" was wrong, and a Kotlin
+  comment asserts the behaviour that is not there.
+* **`entity=macSoftware` does not exist** (item 3c). Apple documents
+  `software`, `iPadSoftware`, `desktopSoftware`.
+* **`isSupported()` makes no channel call** (item 6) — it is a pure expression.
+* **"Five tests" was four, and "the test VM says `macos`"** is true locally
+  only; CI runs `flutter test` on `ubuntu-latest`.
+* **"`market://` is not in Google's documented link formats"** overshot:
+  `market://launch?id=…` is still documented for Play Instant. The README had
+  this right and the design doc did not.
+* **§5's sizing of the test rewrite** was wrong in both numbers.
+
+### Now marked unverified instead of asserted
+
+* **That `url_launcher` hands `apps.apple.com` to the Mac App Store app** (§3).
+  `NSWorkspace` goes to the default https handler. This is load-bearing for
+  "nearly free" and for one `appStoreUri()` serving both Apple platforms, so it
+  needs a Mac before implementing — though not before deciding.
+* **That the https URL opens the App Store app on iOS** (§7) — withdrawn, since
+  nothing rests on it.
+* **That Play's `ReviewManager` throws synchronously** (§2.5) — the contract
+  does not depend on it.
+
+### Also applied
+
+* The committed dartdoc no longer names `flutter_store_listing_play_review`,
+  which does not exist and which `pubspec.yaml` tells us not to point users at
+  (§2.1, §2.5).
+* `playStorePackageName`, `defaultUrlLaunch`, the `FlutterStoreListing()`
+  factory and the two public `force…` *fields* were missing from the renames
+  table, which §5 commits to the CHANGELOG verbatim. The table's baseline is
+  now 1.4.0 rather than 1.3.0 — the reason a member added in 1.4.0 was missed.
+* `lib/src/platform_os_web.dart`'s dartdoc references four removed names (§5).
+* `writeReview` is documented as Apple-only on both methods that take it (§2.4).
+* The Swift fix invalidates two doc comments, and
+  `StoreKitInAppReview.isAvailable()` gets a defined answer (§6).
+
+### Rejected
+
+* **That §5's `example/lib/main.dart` line numbers had drifted.** Checked
+  against the file: `:22`, `:28`, `:29`, `:30`, `:31`, `:33`, `:56` and `:63`
+  are all correct as written. The second reviewer independently confirmed them.
+* **That the per-call facade is "not implementable as written".** It is
+  implementable; what was missing was the mechanism, now supplied. The
+  conclusion was overstated, the underlying observation was right, and acting
+  only on the latter is why §2.4 gained code rather than a caveat.
