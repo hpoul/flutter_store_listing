@@ -49,10 +49,27 @@ class FlutterStoreListing {
         mode: LaunchMode.externalApplication,
       );
 
+  /// No longer called by this package.
+  ///
+  /// It backed the `market://` probe that [launchStoreListing] dropped in
+  /// 1.4.0, and from Android 11 `canLaunchUrl` cannot answer usefully for a
+  /// non-http scheme without a `<queries>` manifest entry. Kept so that
+  /// existing `FlutterStoreListing.customize` calls keep compiling; it is gone
+  /// in 2.0.
   final Future<bool> Function(String url) urlCanLaunch;
+
   final Future<bool> Function(String url) urlLaunch;
 
   static const MethodChannel _channel = MethodChannel('flutter_store_listing');
+
+  /// The Play Store app's package name.
+  ///
+  /// Passed to the native Android implementation so the listing opens in the
+  /// store app rather than a browser. Setting an intent's package is what
+  /// Google's own "Linking to Google Play" guide documents, and it is the
+  /// reason this package has an Android implementation at all — `url_launcher`
+  /// cannot set one.
+  static const playStorePackageName = 'com.android.vending';
 
   static final _instance = FlutterStoreListing.customize();
 
@@ -87,6 +104,49 @@ class FlutterStoreListing {
   Future<bool> _invokeRequestReview() async =>
       (await _channel.invokeMethod<bool>('requestReview')) as bool;
 
+  /// Opens [url] through the native Android implementation, which views it
+  /// with the intent restricted to [playStorePackageName] and retries without
+  /// the restriction when the store app is absent.
+  ///
+  /// Returns null when the native side is not there to answer at all — a host
+  /// that has not been rebuilt since this package was upgraded, for instance —
+  /// so that the caller can still fall back to [urlLaunch] rather than failing
+  /// outright. A false means the device genuinely could not open it.
+  Future<bool?> _invokeOpenStoreListing(String url) async {
+    try {
+      final result = await _channel.invokeMethod<String>('openStoreListing', {
+        'url': url,
+        'preferredPackage': playStorePackageName,
+      });
+      switch (result) {
+        case 'storeApp':
+        case 'external':
+          return true;
+        case 'unavailable':
+          return false;
+      }
+      // Null rather than false, so an unrecognised reply degrades to the
+      // url_launcher fallback instead of silently showing the user nothing.
+      _logger.severe('Unexpected openStoreListing result: $result');
+      return null;
+    } on MissingPluginException catch (error, stackTrace) {
+      _logger.warning(
+        'No native openStoreListing implementation; falling back to '
+        'url_launcher. Rebuild the app if this persists.',
+        error,
+        stackTrace,
+      );
+      return null;
+    } on PlatformException catch (error, stackTrace) {
+      _logger.severe(
+        'Unable to open the store listing natively.',
+        error,
+        stackTrace,
+      );
+      return null;
+    }
+  }
+
   /// Asks the user for a review: the native in-app dialog on iOS, otherwise
   /// the store listing opened externally.
   ///
@@ -118,26 +178,52 @@ class FlutterStoreListing {
   }
 
   /// Launches the URL for reviewing.
-  /// * Android: If play store installed, opens play store via `market:` url,
-  ///     otherwise launches `https://play.google.com/`
+  /// * Android: opens `play.google.com/store/apps/details` in the Play Store
+  ///     app, falling back to whatever else handles the URL — a browser — when
+  ///     the store app is absent.
   /// * iOS: Open `apps.apple.com` - set [iosWriteReview] to true to
   ///     use `?action=write-review`
+  ///
+  /// Up to 1.3.0 Android asked `canLaunchUrl('market://')` first and opened a
+  /// `market:` URL when that said yes. For an app targeting API 30 or higher
+  /// without a `<queries>` entry of its own it could not say yes, so that
+  /// branch was dead and the https URL is what opened. Apps on a lower
+  /// `targetSdk`, apps holding `QUERY_ALL_PACKAGES` and apps that declared the
+  /// query did reach `market://`, and for those this is a behaviour change.
+  ///
+  /// 1.4.0 drops the probe and asks the native implementation to view the https
+  /// URL with the intent restricted to the Play Store app, which is what Google
+  /// documents and what needs no manifest entry from anybody.
   Future<bool> launchStoreListing({bool iosWriteReview = true}) async {
     if (_isIOS) {
       final appId = await getIosAppId();
       // https://developer.apple.com/documentation/storekit/skstorereviewcontroller/requesting_app_store_reviews?language=objc
       final urlPostfix = iosWriteReview ? '?action=write-review' : '';
       return await urlLaunch('${getIosStoreListing(appId)}$urlPostfix');
-    } else {
-      // getAndroidPackageName(), not _getPackageName(): the former honours the
-      // documented [forceAndroidPackageName] override, which this method used
-      // to ignore.
-      final appId = await getAndroidPackageName();
-      if (await urlCanLaunch('market://')) {
-        return await urlLaunch('market://details?id=$appId');
-      } else {
-        return await urlLaunch(getAndroidStoreListing(appId));
+    }
+    // getAndroidPackageName(), not _getPackageName(): the former honours the
+    // documented [forceAndroidPackageName] override, which this method used
+    // to ignore.
+    final url = getAndroidStoreListing(await getAndroidPackageName());
+    if (_isAndroid) {
+      final launched = await _invokeOpenStoreListing(url);
+      if (launched != null) {
+        return launched;
       }
+    }
+    // Either not Android — macOS, Windows, Linux and web still land here, and
+    // 2.0 is where that becomes an explicit "unsupported" rather than a Play
+    // listing — or the native implementation could not answer.
+    try {
+      return await urlLaunch(url);
+    } on PlatformException catch (error, stackTrace) {
+      // `launchUrl` is documented to either return false or throw, and this
+      // method promises a bool. The reachable case is a detached activity:
+      // url_launcher is `ActivityAware` too, so when the native side above
+      // reported `no_activity`, url_launcher's own `ensureActivity` throws
+      // here rather than providing the fallback it looks like.
+      _logger.severe('Unable to open $url.', error, stackTrace);
+      return false;
     }
   }
 
