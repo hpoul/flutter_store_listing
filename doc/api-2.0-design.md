@@ -175,14 +175,18 @@ class FlutterStoreListing {
   static FlutterStoreListing instance = FlutterStoreListing();
 
   /// Every external dependency injectable, for tests and unusual hosts.
+  ///
+  /// The seams are nullable rather than defaulted because a Dart default must
+  /// be a compile-time constant, and `StorePlatform.current` is a getter. Each
+  /// null is resolved to the real implementation in the initializer list.
   FlutterStoreListing.custom({
     String? appStoreId,
     String? macAppStoreId,
     String? androidPackageName,
     InAppReviewPrompt? inAppReview,
-    StorePlatform platform = StorePlatform.current,
-    StoreIdentity identity = const PackageInfoStoreIdentity(),
-    UrlLauncher urlLauncher = launchUrlExternally,
+    StorePlatform? platform,
+    StoreIdentity? identity,
+    UrlLauncher? urlLauncher,
   });
 
   /// Whether this platform has a store listing to open.
