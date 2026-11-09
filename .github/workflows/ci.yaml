@@ -23,10 +23,14 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # `flutter pub get` runs a migrator that rewrites analysis_options.yaml,
-      # so check formatting against the committed sources only.
+      # analysis_options.yaml is committed with the `exclude:` block Flutter's
+      # migrator adds, so `pub get` above is a no-op on it and the tree stays
+      # clean for the publish dry run below.
       - name: Verify formatting
         run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Verify the tree is clean after pub get
+        run: git diff --exit-code
 
       - name: Analyze
         run: flutter analyze --fatal-infos

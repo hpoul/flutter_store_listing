@@ -47,12 +47,16 @@ public class FlutterStoreListingPlugin: NSObject, FlutterPlugin {
 
   /// `SKStoreReviewController` is deprecated as of iOS 18 in favour of
   /// `AppStore.requestReview(in:)`, which needs iOS 16. This is the fallback
-  /// for iOS 13-15.
+  /// for iOS 15, the oldest version Flutter itself supports.
+  ///
+  /// `introduced:` must not claim anything below 14.0 — `requestReview(in:)` is
+  /// itself iOS 14.0+ (`API_DEPRECATED(..., ios(14.0, 18.0))`), so a lower
+  /// bound here is a compile error rather than a wider floor.
   ///
   /// Marking the helper deprecated is what keeps the deprecation warning from
   /// propagating to the caller: an availability check alone does not silence
   /// it, because the symbol is deprecated at every version it is available at.
-  @available(iOS, introduced: 13.0, deprecated: 16.0)
+  @available(iOS, introduced: 15.0, deprecated: 16.0)
   @MainActor
   private static func legacyRequestReview(in scene: UIWindowScene) {
     SKStoreReviewController.requestReview(in: scene)

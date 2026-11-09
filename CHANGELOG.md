@@ -16,7 +16,7 @@ generated `FlutterFramework` Swift package, which Flutter only produces from
   cannot be called from Objective-C.
 * iOS: use **`AppStore.requestReview(in:)`** on iOS 16+. The whole
   `SKStoreReviewController` class is deprecated as of iOS 18; the deprecated
-  `requestReview(in:)` remains the fallback for iOS 13-15. The old
+  `requestReview(in:)` remains the fallback for iOS 15. The old
   `@available(iOS 10.3, *)` guards and the no-scene `requestReview()` call are
   gone.
 * **Remove the Android platform entry.** Its `onMethodCall` only ever returned
@@ -37,7 +37,8 @@ generated `FlutterFramework` Swift package, which Flutter only produces from
 * iOS: generate store listing URLs for `apps.apple.com` without a hardcoded
   `/us/` storefront, instead of the legacy `itunes.apple.com/us/app/id…` form.
 * Give the iOS podspec real metadata (it was unedited template boilerplate)
-  and a 13.0 deployment target.
+  and a 15.0 deployment target, matching the oldest iOS that Flutter 3.44
+  itself supports.
 * Add an actual test suite — the previous one was an empty `main()` — and a
   GitHub Actions workflow that analyzes, formats, tests and builds the example
   for iOS.

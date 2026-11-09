@@ -3,7 +3,7 @@
 Flutter plugin to open store listings for the iOS App Store and the Google Play
 store, and on iOS to ask for a review in-app using StoreKit's review API
 (`AppStore.requestReview(in:)` on iOS 16+, falling back to
-`SKStoreReviewController` on iOS 13–15).
+`SKStoreReviewController` on iOS 15).
 
 Supports both Swift Package Manager and CocoaPods.
 

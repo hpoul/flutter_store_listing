@@ -23,7 +23,7 @@ app store links and open them for iOS or Android.
   s.dependency 'Flutter'
   s.frameworks = 'StoreKit'
 
-  s.ios.deployment_target = '13.0'
+  s.ios.deployment_target = '15.0'
 
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
   s.swift_version = '5.9'

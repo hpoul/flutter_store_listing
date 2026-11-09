@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "flutter_store_listing",
     platforms: [
-        .iOS("13.0")
+        .iOS("15.0")
     ],
     products: [
         .library(name: "flutter-store-listing", targets: ["flutter_store_listing"])
