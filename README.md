@@ -12,11 +12,33 @@ Supports both Swift Package Manager and CocoaPods.
 | | Store listing | In-app review prompt |
 | --- | --- | --- |
 | iOS | ✅ `apps.apple.com` | ✅ StoreKit |
-| Android | ✅ `market://`, else Play web | ❌ see below |
+| Android | ✅ Play Store app, else browser | ❌ see below |
 
-There is no native Android code: the Play listing is opened with
-`url_launcher`, so nothing is needed on the platform side. Play's in-app review
-API is deliberately left out of this package to keep it free of proprietary
+On Android the listing opens the way Google's own [Linking to Google
+Play](https://developer.android.com/distribute/marketing-tools/linking-to-google-play)
+guide documents: an `ACTION_VIEW` intent for the
+`play.google.com/store/apps/details` URL with the package set to
+`com.android.vending`, so the Play Store app handles it instead of a browser or
+a chooser. When that app is absent or disabled, the same URL is viewed without
+the package restriction, and whatever else handles Play links takes it.
+
+**Your app needs no `<queries>` manifest entry for this.** The implementation
+attempts the intent and handles `ActivityNotFoundException`, which Android's
+package visibility rules do not filter — unlike `canLaunchUrl` and
+`queryIntentActivities`, which they do.
+
+Up to 1.3.0 this package probed `canLaunchUrl('market://')` and opened a
+`market://` URL when that said yes. For an app targeting API 30 or higher it
+could not say yes, so the branch was dead and the https URL is what opened;
+apps on a lower `targetSdk`, apps holding `QUERY_ALL_PACKAGES` and apps that
+declared the query themselves did reach `market://`. A plugin can contribute a
+`<queries>` entry to the app's merged manifest, so that was fixable without
+native code — but `setPackage` is not expressible through `url_launcher` at
+all, and Google no longer documents `market://` for store listings, which is
+why the native route won.
+
+The Android side has no Gradle dependencies at all. Play's in-app review API
+is deliberately left out of this package to keep it free of proprietary
 dependencies, which would otherwise end up in F-Droid builds.
 
 `launchRequestReview(onlyNative: true)` therefore does nothing on Android.

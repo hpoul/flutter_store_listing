@@ -1,3 +1,43 @@
+## 1.4.0
+
+**Android gets a native implementation, and the `market://` probe is gone.**
+`launchStoreListing` used to ask `canLaunchUrl('market://')` and open
+`market://details?id=…` when that said yes. For an app targeting API 30 or
+higher that had not declared a `<queries>` entry of its own, it could not say
+yes — the query is subject to package visibility — so the branch never ran and
+the https URL was what actually opened. **Apps on a lower `targetSdk`, apps
+holding `QUERY_ALL_PACKAGES`, and apps that did declare the query reached
+`market://`, and for those this release changes behaviour.**
+
+It now opens the listing the way Google's "Linking to Google Play" guide
+documents: an `ACTION_VIEW` intent for the `play.google.com` URL with the
+package set to `com.android.vending`, which `url_launcher` cannot express.
+When the Play Store app is absent or disabled the same URL is viewed without
+the restriction, so devices without Play — F-Droid installs among them — still
+reach the listing in a browser. **No `<queries>` entry is needed**: the
+implementation attempts the intent and handles `ActivityNotFoundException`
+rather than querying, which package visibility does not filter.
+
+For most users this is the behaviour they already had, arrived at on purpose
+rather than by a probe that always failed. On a device with the Play Store app,
+the listing now opens there rather than in whatever claimed the link.
+
+* The package declares `android` in `flutter.plugin.platforms` for the first
+  time, so pub.dev lists Android support that was always there in practice.
+  Every consumer's Android build therefore gains a Gradle module and a Kotlin
+  compile step, and the module declares `minSdk 24` — Flutter's own floor, and
+  the same value `url_launcher_android` declares, so an app already pulling
+  `url_launcher` is at 24 regardless.
+* The Android side has **no `implementation` dependencies**: no androidx, and
+  in particular no Play Core, so Play's in-app review API is still deliberately
+  out of this package and it stays clean in F-Droid builds. JUnit, Mockito and
+  Robolectric are `testImplementation` only, resolved when the module's own
+  tests are run.
+* `FlutterStoreListing.customize(urlCanLaunch: …)` still compiles but is no
+  longer called by this package. It is removed in 2.0.
+* `FlutterStoreListing.playStorePackageName` is exposed for callers building
+  their own intents.
+
 ## 1.3.0
 
 **Requires Flutter 3.44 / Dart 3.10.** Swift Package Manager support needs the

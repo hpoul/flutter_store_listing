@@ -41,6 +41,47 @@ jobs:
       - name: Publish dry run
         run: flutter pub publish --dry-run
 
+  build-example-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # Compiles the Kotlin through the example app, so the Android plugin
+      # cannot break without CI noticing. This also writes
+      # example/android/local.properties, which the Gradle run below needs to
+      # find the Flutter SDK.
+      - name: Build example (Android)
+        working-directory: example
+        run: |
+          flutter pub get
+          flutter build apk --debug
+
+      # `./gradlew` exists by now even though the example .gitignore keeps it
+      # out of the repository: `flutter build` above copies the wrapper from the
+      # Flutter cache when it is missing, leaving the committed
+      # gradle-wrapper.properties in place. So this honours the same Gradle
+      # version as the build, with no second distribution to download.
+      #
+      # `lintDebug` as well as the unit tests, because the module turns
+      # `checkAllWarnings` and `warningsAsErrors` on and a strict lint config
+      # nothing ever runs is not a config.
+      - name: Test and lint the Android plugin
+        working-directory: example/android
+        run: >
+          ./gradlew --console=plain
+          :flutter_store_listing:testDebugUnitTest
+          :flutter_store_listing:lintDebug
+
   build-example-ios:
     runs-on: macos-latest
     steps:
