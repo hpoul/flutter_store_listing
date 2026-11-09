@@ -87,11 +87,13 @@ void main() {
     });
 
     test('makes no canLaunch probe', () async {
-      // Regression test for the `market://` probe dropped in 1.4.0. It could
-      // not succeed without a `<queries>` entry in the app's manifest, which
-      // this package does not ship, so it cost a platform channel round trip
-      // to answer false every time. `canLaunch: true` here is what used to
-      // divert the user to `market://details?id=...`.
+      // Regression test for the `market://` probe dropped in 1.4.0. Its answer
+      // depended on package visibility — true where the app had been installed
+      // from the Play Store, false for an install from elsewhere on
+      // targetSdk 30+ — so it cost a platform channel round trip to learn how
+      // the app had been installed rather than whether the URL could open.
+      // `canLaunch: true` here is what used to divert the user to
+      // `market://details?id=...`.
       final launcher = _RecordingLauncher(canLaunch: true);
       await _subject(
         launcher,

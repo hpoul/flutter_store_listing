@@ -2,12 +2,19 @@
 
 **Android gets a native implementation, and the `market://` probe is gone.**
 `launchStoreListing` used to ask `canLaunchUrl('market://')` and open
-`market://details?id=…` when that said yes. For an app targeting API 30 or
-higher that had not declared a `<queries>` entry of its own, it could not say
-yes — the query is subject to package visibility — so the branch never ran and
-the https URL was what actually opened. **Apps on a lower `targetSdk`, apps
-holding `QUERY_ALL_PACKAGES`, and apps that did declare the query reached
-`market://`, and for those this release changes behaviour.**
+`market://details?id=…` when that said yes. On a device where the app was
+installed from the Play Store it generally did say yes: Android makes "the app
+that installed your app" visible automatically, with no `<queries>` entry and
+whatever the `targetSdk`. **For most users, then, `market://details?id=…` is
+what actually opened, and this release changes the route rather than the
+destination** — both it and the https URL with the package set land in the
+Play Store app.
+
+The probe did fail for installs from outside the Play Store — sideloaded, or
+from another store — on an app targeting API 30 or higher with no `<queries>`
+entry of its own, because `com.android.vending` is then not automatically
+visible. Those users got the https URL in a browser, and still do whenever the
+Play Store app is absent.
 
 It now opens the listing the way Google's "Linking to Google Play" guide
 documents: an `ACTION_VIEW` intent for the `play.google.com` URL with the
@@ -18,9 +25,10 @@ reach the listing in a browser. **No `<queries>` entry is needed**: the
 implementation attempts the intent and handles `ActivityNotFoundException`
 rather than querying, which package visibility does not filter.
 
-For most users this is the behaviour they already had, arrived at on purpose
-rather than by a probe that always failed. On a device with the Play Store app,
-the listing now opens there rather than in whatever claimed the link.
+For most users this is the behaviour they already had, now arrived at on
+purpose and by the route Google documents, rather than through a probe whose
+answer depended on how the app had been installed. On a device without the
+Play Store app, the listing still opens in whatever claims Play links.
 
 * The package declares `android` in `flutter.plugin.platforms` for the first
   time, so pub.dev lists Android support that was always there in practice.

@@ -52,8 +52,9 @@ class FlutterStoreListing {
   /// No longer called by this package.
   ///
   /// It backed the `market://` probe that [launchStoreListing] dropped in
-  /// 1.4.0, and from Android 11 `canLaunchUrl` cannot answer usefully for a
-  /// non-http scheme without a `<queries>` manifest entry. Kept so that
+  /// 1.4.0. From Android 11 `canLaunchUrl`'s answer for a non-http scheme
+  /// depends on package visibility, so it varied with how the app had been
+  /// installed rather than with whether the URL could be opened. Kept so that
   /// existing `FlutterStoreListing.customize` calls keep compiling; it is gone
   /// in 2.0.
   final Future<bool> Function(String url) urlCanLaunch;
@@ -185,11 +186,17 @@ class FlutterStoreListing {
   ///     use `?action=write-review`
   ///
   /// Up to 1.3.0 Android asked `canLaunchUrl('market://')` first and opened a
-  /// `market:` URL when that said yes. For an app targeting API 30 or higher
-  /// without a `<queries>` entry of its own it could not say yes, so that
-  /// branch was dead and the https URL is what opened. Apps on a lower
-  /// `targetSdk`, apps holding `QUERY_ALL_PACKAGES` and apps that declared the
-  /// query did reach `market://`, and for those this is a behaviour change.
+  /// `market:` URL when that said yes. Where the app had been installed from
+  /// the Play Store it generally did say yes, because Android makes the app
+  /// that installed your app visible automatically — no `<queries>` entry,
+  /// whatever the `targetSdk`. So for most users `market://` is what opened,
+  /// and 1.4.0 changes the route rather than the destination: both it and the
+  /// https URL with the package set reach the Play Store app.
+  ///
+  /// The probe did fail for an install from outside the Play Store on an app
+  /// targeting API 30 or higher with no `<queries>` entry of its own, since
+  /// `com.android.vending` is then not automatically visible. Those users got
+  /// the https URL in a browser, and still do when the store app is absent.
   ///
   /// 1.4.0 drops the probe and asks the native implementation to view the https
   /// URL with the intent restricted to the Play Store app, which is what Google
