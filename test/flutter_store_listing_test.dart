@@ -63,35 +63,42 @@ void main() {
     });
   });
 
-  group('launchStoreListing on a non-iOS platform', () {
-    // The test VM reports `macos`, so these exercise the non-iOS branch.
-    // The iOS branch needs a real iOS host, since the platform is resolved
-    // through a conditional import rather than an injectable seam.
+  group('launchStoreListing on a non-iOS, non-Android platform', () {
+    // The test VM reports `macos`, so these exercise the url_launcher branch.
+    //
+    // Neither of the other two branches is reachable from `flutter test`: the
+    // iOS one needs a real iOS host and the Android one goes through the
+    // method channel to the native implementation, and the platform itself is
+    // resolved through a conditional import rather than an injectable seam, so
+    // a test cannot fake it either. The Kotlin side has its own unit tests in
+    // `android/src/test`; making the platform injectable is 2.0's job.
 
-    test(
-      'prefers the market:// URL when the play store can handle it',
-      () async {
-        final launcher = _RecordingLauncher(canLaunch: true);
-        final result = await _subject(
-          launcher,
-          androidPackageName: 'design.codeux.authpass',
-        ).launchStoreListing();
-
-        expect(result, isTrue);
-        expect(launcher.canLaunchQueries, ['market://']);
-        expect(launcher.launched, [
-          'market://details?id=design.codeux.authpass',
-        ]);
-      },
-    );
-
-    test('falls back to the https URL when market:// cannot launch', () async {
+    test('opens the https play store URL', () async {
       final launcher = _RecordingLauncher(canLaunch: false);
+      final result = await _subject(
+        launcher,
+        androidPackageName: 'design.codeux.authpass',
+      ).launchStoreListing();
+
+      expect(result, isTrue);
+      expect(launcher.launched, [
+        'https://play.google.com/store/apps/details?id=design.codeux.authpass',
+      ]);
+    });
+
+    test('makes no canLaunch probe', () async {
+      // Regression test for the `market://` probe dropped in 1.4.0. It could
+      // not succeed without a `<queries>` entry in the app's manifest, which
+      // this package does not ship, so it cost a platform channel round trip
+      // to answer false every time. `canLaunch: true` here is what used to
+      // divert the user to `market://details?id=...`.
+      final launcher = _RecordingLauncher(canLaunch: true);
       await _subject(
         launcher,
         androidPackageName: 'design.codeux.authpass',
       ).launchStoreListing();
 
+      expect(launcher.canLaunchQueries, isEmpty);
       expect(launcher.launched, [
         'https://play.google.com/store/apps/details?id=design.codeux.authpass',
       ]);

@@ -37,3 +37,11 @@ build/
 flutter_export_environment.sh
 .cxx
 
+# The Android plugin module. `build/` above already covers android/build; these
+# are the rest of what a Gradle run leaves behind, and they must not reach the
+# published archive either, since pub excludes only what git ignores.
+
+android/.gradle/
+android/.kotlin/
+android/local.properties
+
