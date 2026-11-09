@@ -64,7 +64,9 @@ void main() {
   });
 
   group('launchStoreListing on a non-iOS, non-Android platform', () {
-    // The test VM reports `macos`, so these exercise the url_launcher branch.
+    // The test VM reports the host it runs on — `macos` locally, `linux` in
+    // CI, which runs `flutter test` on `ubuntu-latest`. Either way it is
+    // neither iOS nor Android, so these exercise the url_launcher branch.
     //
     // Neither of the other two branches is reachable from `flutter test`: the
     // iOS one needs a real iOS host and the Android one goes through the
@@ -87,12 +89,12 @@ void main() {
     });
 
     test('makes no canLaunch probe', () async {
-      // Regression test for the `market://` probe dropped in 1.4.0. Its answer
-      // depended on package visibility — true where the app had been installed
-      // from the Play Store, false for an install from elsewhere on
-      // targetSdk 30+ — so it cost a platform channel round trip to learn how
-      // the app had been installed rather than whether the URL could open.
-      // `canLaunch: true` here is what used to divert the user to
+      // Regression test for the `market://` probe dropped in 1.4.0. Its
+      // answer depended on package visibility — true where the app had been
+      // installed from the Play Store, false for an install from elsewhere
+      // on targetSdk 30+ — so it cost a platform channel round trip to learn
+      // how the app had been installed rather than whether the URL could
+      // open. `canLaunch: true` here is what used to divert the user to
       // `market://details?id=...`.
       final launcher = _RecordingLauncher(canLaunch: true);
       await _subject(
@@ -123,7 +125,8 @@ void main() {
 
   group('platform support', () {
     test('native review requests are iOS-only', () async {
-      // macOS on the test VM, so this is the "not iOS" answer.
+      // A non-iOS host either way (see above), so this is the "not iOS"
+      // answer.
       expect(
         await FlutterStoreListing().isSupportedNativeRequestReview(),
         isFalse,
