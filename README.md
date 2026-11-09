@@ -81,6 +81,15 @@ per user and per app version, and it never reports back either way. A
 `StoreListingOutcome.inAppReviewRequested` means the request reached the OS,
 not that anything appeared on screen.
 
+**The fallback runs when there is no prompt, not when there is one that cannot
+be shown yet.** iOS needs a foreground-active window scene to present into,
+and there is none during the launch transition, while a system alert is up, or
+for a visible but unfocused iPad window. That reports
+`inAppReviewNotNow` and runs **no** fallback: the user never asked to leave the
+app, so sending them to the App Store because it was still waking up would be
+worse than doing nothing. If you ask for a review from a post-frame callback at
+startup, expect this outcome sometimes and ask again later.
+
 # Usage
 
 See the [API documentation](https://pub.dev/documentation/flutter_store_listing/latest/flutter_store_listing/FlutterStoreListing-class.html)
@@ -120,6 +129,11 @@ switch (outcome) {
   case StoreListingOutcome.inAppReviewRequested:
   case StoreListingOutcome.storeListingOpened:
     // outcome.isSuccess is true for exactly these two.
+    break;
+  case StoreListingOutcome.inAppReviewNotNow:
+    // A prompt exists but could not be shown this instant — on iOS, no
+    // foreground-active scene. Nothing happened and no fallback ran, on
+    // purpose. This is the one failure worth retrying unchanged.
     break;
   default:
     // unsupportedPlatform, inAppReviewUnavailable, storeIdUnavailable or

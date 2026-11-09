@@ -57,17 +57,26 @@ enum StoreListingOutcome {
   /// This platform has no app store at all. Web, Windows, Linux.
   unsupportedPlatform,
 
-  /// This platform has a store, but no review prompt was shown — and you asked
-  /// for no fallback.
+  /// This platform has a store, but no review prompt — and you asked for no
+  /// fallback.
   ///
-  /// Three causes, which this value does not distinguish: Android with no
-  /// [InAppReviewPrompt] configured; a prompt that reported itself unavailable
-  /// at request time; or **a prompt that was available and refused the
-  /// request**. The third is the signal 2.0 added on iOS, where StoreKit has
-  /// no foreground-active scene to present into — so it is not safe to read
-  /// this as "this platform will never have a prompt" and hide the row for
-  /// good.
+  /// Android with no [InAppReviewPrompt] configured, or a prompt that reported
+  /// itself unavailable. A prompt that exists but could not be shown *right
+  /// now* is [inAppReviewNotNow] instead, so this value does mean "not here",
+  /// and a UI may hide the row on it.
   inAppReviewUnavailable,
+
+  /// A prompt exists but could not be shown right now, so nothing happened.
+  ///
+  /// On iOS, no window scene was foreground-active — true during the launch
+  /// transition, while a system alert is up, and for a visible but unfocused
+  /// iPad window. **Your [ReviewFallback] deliberately did not run**: the user
+  /// never asked to leave the app, and sending them to the store because the
+  /// app was still waking up is worse than doing nothing.
+  ///
+  /// So this is the one unsuccessful outcome worth retrying unchanged. Ask
+  /// again on the next launch, or after the next frame.
+  inAppReviewNotNow,
 
   /// The store id for this platform is not known, so no URL could be built.
   ///

@@ -33,10 +33,16 @@ class _FakeIdentity implements StoreIdentity {
 }
 
 class _FakePrompt implements InAppReviewPrompt {
-  _FakePrompt({this.available = true, this.accepts = true});
+  _FakePrompt({
+    this.available = true,
+    this.result = InAppReviewRequest.requested,
+  });
 
   final bool available;
-  final bool accepts;
+
+  /// What [requestReview] should answer. Three states rather than a bool,
+  /// because `notNow` and `unavailable` are handled oppositely by the facade.
+  final InAppReviewRequest result;
 
   var availableCalls = 0;
   var requestCalls = 0;
@@ -48,9 +54,9 @@ class _FakePrompt implements InAppReviewPrompt {
   }
 
   @override
-  Future<bool> requestReview() async {
+  Future<InAppReviewRequest> requestReview() async {
     requestCalls++;
-    return accepts;
+    return result;
   }
 }
 
@@ -428,13 +434,13 @@ void main() {
     );
 
     test(
-      'falls back when the prompt is available but refuses the request',
+      'falls back when an available prompt turns out to be broken',
       () async {
-        // This is the signal the iOS scene fix creates: with no
-        // foreground-active scene StoreKit now reports false rather than
-        // claiming a prompt it did not show, so the fallback runs.
+        // `unavailable` from a prompt that said it was available: a host that
+        // was not rebuilt, so the native side is missing. No amount of waiting
+        // fixes that, so the fallback is the right answer.
         final launcher = _FakeLauncher();
-        final prompt = _FakePrompt(accepts: false);
+        final prompt = _FakePrompt(result: InAppReviewRequest.unavailable);
         final outcome = await _subject(
           platform: StorePlatform.iOS,
           appStoreId: '1479297675',
@@ -445,6 +451,50 @@ void main() {
         expect(prompt.requestCalls, 1);
         expect(outcome, StoreListingOutcome.storeListingOpened);
         expect(launcher.opened, hasLength(1));
+      },
+    );
+
+    test('does not fall back when the prompt says "not now"', () async {
+      // The whole point of the third signal. An app asking for a review from a
+      // post-frame callback on a cold start, before the scene reaches
+      // .foregroundActive, used to be sent to the App Store write-review page
+      // with no interaction at all — worse than 1.4.0, which showed nothing.
+      final launcher = _FakeLauncher();
+      final prompt = _FakePrompt(result: InAppReviewRequest.notNow);
+      final outcome = await _subject(
+        platform: StorePlatform.iOS,
+        appStoreId: '1479297675',
+        launcher: launcher,
+        inAppReview: prompt,
+      ).requestReview();
+
+      expect(prompt.requestCalls, 1);
+      expect(outcome, StoreListingOutcome.inAppReviewNotNow);
+      expect(outcome.isSuccess, isFalse);
+      expect(launcher.opened, isEmpty);
+    });
+
+    test(
+      '"not now" ignores the fallback, whichever one was asked for',
+      () async {
+        // Including the explicit ones: the fallback answers "there is no prompt
+        // here", and this is not that.
+        for (final fallback in ReviewFallback.values) {
+          final launcher = _FakeLauncher();
+          final outcome = await _subject(
+            platform: StorePlatform.iOS,
+            appStoreId: '1479297675',
+            launcher: launcher,
+            inAppReview: _FakePrompt(result: InAppReviewRequest.notNow),
+          ).requestReview(fallback: fallback);
+
+          expect(
+            outcome,
+            StoreListingOutcome.inAppReviewNotNow,
+            reason: '$fallback',
+          );
+          expect(launcher.opened, isEmpty, reason: '$fallback');
+        }
       },
     );
 
@@ -558,6 +608,25 @@ void main() {
       expect(storeKit.requestCalls, 0);
     });
 
+    test('a preferred prompt saying "not now" is not retried', () async {
+      // Only `unavailable` hands over. Retrying a "not now" through the second
+      // prompt would make one request from the caller into two attempts at the
+      // user — and on iOS both prompts would be looking at the same inactive
+      // scene anyway.
+      final play = _FakePrompt(result: InAppReviewRequest.notNow);
+      final storeKit = _FakePrompt();
+      final outcome = await _subject(
+        platform: StorePlatform.iOS,
+        appStoreId: '1479297675',
+        launcher: _FakeLauncher(),
+        inAppReview: PreferredInAppReview(preferred: play, builtIn: storeKit),
+      ).requestReview();
+
+      expect(outcome, StoreListingOutcome.inAppReviewNotNow);
+      expect(play.requestCalls, 1);
+      expect(storeKit.requestCalls, 0);
+    });
+
     test('neither available runs the fallback', () async {
       final launcher = _FakeLauncher();
       final outcome = await _subject(
@@ -584,7 +653,7 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, (call) async {
             calls.add(call.method);
-            return true;
+            return 'requested';
           });
       addTearDown(() {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -928,41 +997,68 @@ void main() {
       );
     });
 
-    test('reports whether the request reached StoreKit', () async {
-      mockNative((call) async => true);
+    test('reports that the request reached StoreKit', () async {
+      mockNative((call) async => 'requested');
       expect(
         await const StoreKitInAppReview(StorePlatform.iOS).requestReview(),
-        isTrue,
+        InAppReviewRequest.requested,
       );
     });
 
-    test('a null reply is false rather than a TypeError', () async {
+    test('maps a missing scene to notNow, not to unavailable', () async {
+      // The distinction the whole third signal exists for: nothing was shown,
+      // but the prompt is there and will work once the app is foreground. The
+      // facade must not substitute the store listing for this.
+      mockNative((call) async => 'noActiveScene');
+      expect(
+        await const StoreKitInAppReview(StorePlatform.iOS).requestReview(),
+        InAppReviewRequest.notNow,
+      );
+    });
+
+    test('a null reply is unavailable rather than a TypeError', () async {
       // Regression test: 1.4.0 cast the reply with `as bool`, so a null threw.
       mockNative((call) async => null);
       expect(
         await const StoreKitInAppReview(StorePlatform.iOS).requestReview(),
-        isFalse,
+        InAppReviewRequest.unavailable,
+      );
+    });
+
+    test('a reply this version cannot read is unavailable', () async {
+      // Degrades like the launcher's, and `unavailable` rather than `notNow`
+      // so the fallback still runs: a reply we cannot read is not a promise
+      // that waiting will help.
+      mockNative((call) async => true);
+      expect(
+        await const StoreKitInAppReview(StorePlatform.iOS).requestReview(),
+        InAppReviewRequest.unavailable,
       );
     });
 
     test(
-      'a missing native implementation is false, so the fallback runs',
+      'a missing native implementation is unavailable, so the fallback runs',
       () async {
         // Not an exception out of requestReview: up to 1.4.0 this propagated,
         // because _invokeRequestReview had no try/catch at all.
+        //
+        // And `unavailable`, not `notNow`: a host that was not rebuilt is not
+        // a transient condition, so this is exactly the case the fallback is
+        // for. §2.6 asks for both behaviours, which is why a bool could not
+        // carry them.
         mockNative((call) async => throw MissingPluginException());
         expect(
           await const StoreKitInAppReview(StorePlatform.iOS).requestReview(),
-          isFalse,
+          InAppReviewRequest.unavailable,
         );
       },
     );
 
-    test('a platform exception is false too', () async {
+    test('a platform exception is unavailable too', () async {
       mockNative((call) async => throw PlatformException(code: 'whatever'));
       expect(
         await const StoreKitInAppReview(StorePlatform.iOS).requestReview(),
-        isFalse,
+        InAppReviewRequest.unavailable,
       );
     });
   });
@@ -985,15 +1081,15 @@ void main() {
       }
     });
 
-    test('has exactly the six values the suite asserts', () {
+    test('has exactly the seven values the suite asserts', () {
       // A tripwire on the count, and nothing more than that: it cannot tell
       // whether a value is reachable, and it still passes if one is renamed.
-      // What establishes reachability is that each of the six is asserted by a
-      // test above — inAppReviewRequested, storeListingOpened,
-      // unsupportedPlatform, inAppReviewUnavailable, storeIdUnavailable and
-      // launchRefused. Adding a seventh fails here, which is the prompt to
-      // give it a home.
-      expect(StoreListingOutcome.values, hasLength(6));
+      // What establishes reachability is that each of the seven is asserted by
+      // a test above — inAppReviewRequested, storeListingOpened,
+      // unsupportedPlatform, inAppReviewUnavailable, inAppReviewNotNow,
+      // storeIdUnavailable and launchRefused. Adding an eighth fails here,
+      // which is the prompt to give it a home.
+      expect(StoreListingOutcome.values, hasLength(7));
     });
   });
 

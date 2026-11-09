@@ -234,12 +234,33 @@ class FlutterStoreListing {
   /// A [StoreListingOutcome.inAppReviewRequested] means the request reached
   /// the OS, not that a prompt appeared — StoreKit rate-limits it per user and
   /// per app version and never reports back.
+  ///
+  /// [fallback] runs when there is **no** prompt to show. It does not run when
+  /// a prompt exists and could not be shown this instant, which answers
+  /// [StoreListingOutcome.inAppReviewNotNow] and leaves the user where they
+  /// are: on iOS that state is transient, so substituting the store listing
+  /// would eject someone who never asked to leave the app. That makes
+  /// `inAppReviewNotNow` the one unsuccessful outcome worth retrying unchanged.
   Future<StoreListingOutcome> requestReview({
     ReviewFallback fallback = ReviewFallback.writeReviewPage,
   }) async {
     final prompt = _effectiveInAppReview;
-    if (await prompt.isAvailable() && await prompt.requestReview()) {
-      return StoreListingOutcome.inAppReviewRequested;
+    if (await prompt.isAvailable()) {
+      switch (await prompt.requestReview()) {
+        case InAppReviewRequest.requested:
+          return StoreListingOutcome.inAppReviewRequested;
+        case InAppReviewRequest.notNow:
+          // Deliberately short of the fallback. A prompt that exists but could
+          // not be shown this instant is not a reason to send the user to the
+          // store: they never asked to leave the app, and on iOS this state is
+          // transient — the launch transition, a system alert, an unfocused
+          // iPad window. Running the fallback here meant an app asking for a
+          // review from a post-frame callback on a cold start could eject the
+          // user to the App Store with no interaction at all.
+          return StoreListingOutcome.inAppReviewNotNow;
+        case InAppReviewRequest.unavailable:
+          break;
+      }
     }
     switch (fallback) {
       case ReviewFallback.none:

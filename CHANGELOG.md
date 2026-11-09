@@ -27,9 +27,10 @@ lookup is gone.** The design and its reasoning are in
   could be faked. Both are injectable now and the suite covers every outcome.
 * **iOS could claim a prompt it had not shown.** The Swift side fell back to an
   arbitrary member of `connectedScenes` when none was foreground-active, then
-  reported success. It now reports `false`, so your `ReviewFallback` runs —
-  which means the default behaviour sends the user to the write-review page
-  where 1.4.0 showed them nothing.
+  reported success. It now says so, and you get the new
+  `inAppReviewNotNow` — **no fallback runs**, because that state is transient
+  and the user never asked to leave the app. An app requesting a review from a
+  post-frame callback at startup sees this sometimes; ask again later.
 
 ### Migration
 
@@ -85,7 +86,17 @@ await FlutterStoreListing.instance.openStoreListing(writeReview: true);
   breaking change by Dart's rules and so is said here rather than implied to be
   free. Keep a `default` clause in a switch statement, or a wildcard `_` case
   in a switch expression — `default` is a compile-time error in an expression.
-  `ReviewFallback` and `StorePlatform` are closed.
+  `ReviewFallback`, `StorePlatform` and `InAppReviewRequest` are closed.
+* **The review fallback runs when there is no prompt, not when there is one
+  that cannot be shown yet.** `InAppReviewPrompt.requestReview()` returns
+  `InAppReviewRequest` rather than a `bool` so those two are distinguishable:
+  `unavailable` runs your `ReviewFallback`, `notNow` reports
+  `inAppReviewNotNow` and does nothing. A `bool` could not carry it, because
+  `isAvailable()` answers from the platform alone on iOS and so reads `true`
+  both for an inactive scene and for a plugin that never registered — and those
+  want opposite handling. If you implement the seam, note that
+  **`unavailable` is the value for a failure**, which is what `false` used to
+  mean.
 * **`InAppReviewPrompt` is the Android in-app review seam.** A separate package
   can implement it against Play's review API and you wire it in with
   `configure(inAppReview: …)`, so the proprietary Play dependency stays out of

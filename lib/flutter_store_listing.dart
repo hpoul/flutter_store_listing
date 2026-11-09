@@ -35,6 +35,10 @@ export 'src/defaults.dart'
         StoreKitInAppReview;
 export 'src/outcomes.dart' show ReviewFallback, StoreListingOutcome;
 export 'src/seams.dart'
-    show InAppReviewPrompt, StoreIdentity, StoreListingLauncher;
+    show
+        InAppReviewPrompt,
+        InAppReviewRequest,
+        StoreIdentity,
+        StoreListingLauncher;
 export 'src/store_listing.dart' show FlutterStoreListing;
 export 'src/store_platform.dart' show StorePlatform;

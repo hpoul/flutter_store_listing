@@ -1,9 +1,10 @@
 /// The three seams every external dependency goes through.
 ///
-/// `@docImport` so that the `[FlutterStoreListing.…]` references below resolve
-/// to links: this library deliberately has no import of the facade, since the
-/// facade depends on it.
+/// `@docImport` so that the `[FlutterStoreListing.…]` and `[ReviewFallback]`
+/// references below resolve to links: this library deliberately has no import
+/// of either, since both depend on it.
 ///
+/// @docImport 'outcomes.dart';
 /// @docImport 'store_listing.dart';
 library;
 
@@ -60,15 +61,46 @@ abstract interface class InAppReviewPrompt {
   /// **Must not throw**, and must report unavailability as `false`.
   Future<bool> isAvailable();
 
-  /// Asks for the prompt, reporting whether the request reached the OS.
+  /// Asks for the prompt.
   ///
-  /// A `true` means the request was accepted, **not** that a prompt appeared —
-  /// neither StoreKit nor Play reports that back.
+  /// [InAppReviewRequest.requested] means the request reached the OS, **not**
+  /// that a prompt appeared — neither StoreKit nor Play reports that back.
   ///
-  /// **Must not throw** either: a failed request is `false`. This matters
-  /// because the first implementation outside this package will wrap Play's
-  /// review flow, which reports failure rather than returning cleanly, and an
-  /// interface whose only expected implementation violates an unstated rule is
-  /// not a contract.
-  Future<bool> requestReview();
+  /// **Must not throw**: a failed request is
+  /// [InAppReviewRequest.unavailable]. This matters because the first
+  /// implementation outside this package will wrap Play's review flow, which
+  /// reports failure rather than returning cleanly, and an interface whose only
+  /// expected implementation violates an unstated rule is not a contract.
+  Future<InAppReviewRequest> requestReview();
+}
+
+/// What an [InAppReviewPrompt] did with a request.
+///
+/// A `bool` here was not enough, which took a review round to notice. The two
+/// ways a request can fail want opposite handling by the caller, and
+/// [InAppReviewPrompt.isAvailable] cannot tell them apart beforehand: on iOS it
+/// answers from the platform value alone, with no channel call, so it says
+/// `true` on a device whose scene is inactive *and* on a host whose plugin
+/// never registered.
+///
+/// This set is **closed**: no value will be added in a minor release.
+enum InAppReviewRequest {
+  /// The request reached the OS.
+  requested,
+
+  /// Nothing was shown, and nothing can be until something outside this
+  /// package's view changes — on iOS, no window scene was foreground-active,
+  /// which is true during the launch transition, while a system alert is up,
+  /// and for a visible but unfocused iPad window.
+  ///
+  /// The caller's [ReviewFallback] **does not run** for this. The user did not
+  /// ask to leave the app, and sending them to the store because the app was
+  /// still waking up is worse than doing nothing. Ask again later.
+  notNow,
+
+  /// This prompt cannot show anything: the platform has none, or the
+  /// implementation is missing or broken.
+  ///
+  /// The caller's [ReviewFallback] runs, which is the whole reason it exists.
+  unavailable,
 }

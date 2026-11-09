@@ -190,31 +190,50 @@ class StoreKitInAppReview implements InAppReviewPrompt {
   @override
   Future<bool> isAvailable() async => platform == StorePlatform.iOS;
 
+  /// The native side answers with a status string rather than a bool, so that
+  /// "StoreKit took it" and "there was no scene to present in" are two
+  /// answers instead of one.
+  ///
+  /// `Object?` and a switch, not a cast, for the reason the launcher gives: a
+  /// reply this version cannot read must degrade, not throw.
   @override
-  Future<bool> requestReview() async {
+  Future<InAppReviewRequest> requestReview() async {
     try {
-      // `?? false` rather than a cast: a null reply used to throw a TypeError.
-      return await _channel.invokeMethod<bool>('requestReview') ?? false;
+      final result = await _channel.invokeMethod<Object?>('requestReview');
+      switch (result) {
+        case 'requested':
+          return InAppReviewRequest.requested;
+        case 'noActiveScene':
+          _logger.info(
+            'No foreground-active scene, so StoreKit was not asked. Nothing '
+            'was shown and no fallback ran; ask again later.',
+          );
+          return InAppReviewRequest.notNow;
+      }
+      _logger.severe('Unexpected requestReview result: $result');
+      return InAppReviewRequest.unavailable;
     } on MissingPluginException catch (error, stackTrace) {
+      // Unavailable, not `notNow`: this is a host that was not rebuilt, which
+      // no amount of waiting fixes, so the fallback *should* run. Telling it
+      // apart from a missing scene is what the third value is for — §2.6 asks
+      // for both behaviours and a bool could only express one.
       _logger.warning(
         'No native requestReview implementation; treating the prompt as '
         'unavailable so the fallback runs. Rebuild the app if this persists.',
         error,
         stackTrace,
       );
-      return false;
+      return InAppReviewRequest.unavailable;
     } on PlatformException catch (error, stackTrace) {
       _logger.severe('Unable to request a review.', error, stackTrace);
-      return false;
+      return InAppReviewRequest.unavailable;
     } catch (error, stackTrace) {
-      // Including a `TypeError` from the reply cast above, which is why that
-      // one is `invokeMethod<bool>` with a `?? false` rather than a cast.
       _logger.severe(
         'Unexpected error requesting a review.',
         error,
         stackTrace,
       );
-      return false;
+      return InAppReviewRequest.unavailable;
     }
   }
 }
@@ -256,13 +275,19 @@ class PreferredInAppReview implements InAppReviewPrompt {
   /// is a platform comparison with no channel call — and a stateless resolution
   /// cannot answer for one prompt and then request from the other.
   @override
-  Future<bool> requestReview() async {
+  Future<InAppReviewRequest> requestReview() async {
     if (await preferred.isAvailable()) {
-      return await preferred.requestReview();
+      final result = await preferred.requestReview();
+      // Only [InAppReviewRequest.unavailable] hands over. A preferred prompt
+      // that said "not now" has answered — retrying through a second prompt
+      // would show the user two dialogs' worth of attempts for one request.
+      if (result != InAppReviewRequest.unavailable) {
+        return result;
+      }
     }
     if (await builtIn.isAvailable()) {
       return await builtIn.requestReview();
     }
-    return false;
+    return InAppReviewRequest.unavailable;
   }
 }

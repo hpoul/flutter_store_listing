@@ -100,8 +100,15 @@ enum StoreListingOutcome {
 
   /// This platform has a store, but no in-app review prompt — and you asked
   /// for no fallback. Android with no [InAppReviewPrompt] configured, or a
-  /// prompt that reported itself unavailable at request time.
+  /// prompt that reported itself unavailable.
   inAppReviewUnavailable,
+
+  /// A prompt exists but could not be shown right now, so nothing happened
+  /// and the `ReviewFallback` deliberately did not run. On iOS: no
+  /// foreground-active window scene. The one failure worth retrying
+  /// unchanged. Added in §11 — see "The fallback no longer runs for a
+  /// transient failure".
+  inAppReviewNotNow,
 
   /// The store id for this platform is not known, so no URL could be built.
   /// Pass `appStoreId` to rule this out on Apple platforms.
@@ -475,11 +482,17 @@ abstract interface class InAppReviewPrompt {
   /// Implementations must not throw, and must report unavailability as `false`.
   Future<bool> isAvailable();
 
-  /// Must not throw either: a failed request is `false`. A `true` means the
-  /// request reached the OS, not that a prompt appeared — neither StoreKit nor
-  /// Play reports that back.
-  Future<bool> requestReview();
+  /// Must not throw either: a failed request is
+  /// `InAppReviewRequest.unavailable`. A `requested` means the request reached
+  /// the OS, not that a prompt appeared — neither StoreKit nor Play reports
+  /// that back.
+  Future<InAppReviewRequest> requestReview();
 }
+
+/// Three states, not a bool: the two ways a request can fail want opposite
+/// handling, and `isAvailable()` cannot tell them apart beforehand. Added in
+/// §11.
+enum InAppReviewRequest { requested, notNow, unavailable }
 ```
 
 **`StoreListingLauncher` is an interface, not the `Future<bool> Function(Uri)`
@@ -556,11 +569,12 @@ both, so this is settled explicitly:
 * An unrecognised reply from the native side falls back rather than reporting
   failure, so a version skew between Dart and native degrades instead of
   showing the user nothing.
-* `InAppReviewPrompt.isAvailable()` false, or `requestReview()` false → the
-  `ReviewFallback` runs, and under `ReviewFallback.none` the outcome is
-  `inAppReviewUnavailable`. This is exactly the signal §6's Swift scene fix
-  creates, so it gets a mapping of its own rather than being left to §2.1's
-  parenthetical.
+* `InAppReviewPrompt.isAvailable()` false, or `requestReview()` returning
+  `unavailable` → the `ReviewFallback` runs, and under `ReviewFallback.none`
+  the outcome is `inAppReviewUnavailable`. **`requestReview()` returning
+  `notNow` runs no fallback at all** and reports `inAppReviewNotNow`; §11
+  explains why this needed a third value rather than the `false` revision 4
+  specified here.
 * **Which layer catches all of this: the bundled implementations, not the
   facade.** Every mapping above is the documented behaviour of the
   `StoreKitInAppReview` and the default `StoreListingLauncher` that ship in
@@ -842,7 +856,12 @@ The CHANGELOG will carry this table and the AuthPass warning verbatim.
 member — and `result(true)` is reported for a prompt presented into a
 possibly-background scene. Shipping 2.0 with `inAppReviewRequested` still able
 to lie would undercut the whole point of §2.1, so: when there is no
-foreground-active scene, return false so the fallback runs.
+foreground-active scene, do not claim success.
+
+**Revision 4 said "return false so the fallback runs", and §11 reverses the
+second half of that.** The scene check reports `noActiveScene` now, which Dart
+maps to `inAppReviewNotNow` and runs *no* fallback. Everything below about the
+CHANGELOG consequence is superseded by §11.
 
 **It is one line of code** — deleting `?? scenes.first` — not the three
 revision 2 estimated, plus two doc comments the deletion makes wrong:
@@ -1248,17 +1267,10 @@ documentation fix, and README and CHANGELOG now say so.
 
 ### Not taken
 
-* **That a transient `.foregroundInactive` scene should not run the
-  fallback.** The reviewer is right that §6 routes a *temporary* state into the
-  same fallback as a *permanent* one, so an app calling `requestReview()` from
-  a post-frame callback on a cold start can eject the user to the App Store
-  with no interaction. But §2.6 specifies this mapping in as many words —
-  "`isAvailable()` false, **or `requestReview()` false** → the `ReviewFallback`
-  runs" — and §6 states the consequence and accepts it. Distinguishing "not
-  now" from "not ever" needs a third signal through
-  `InAppReviewPrompt.requestReview`'s `bool`, which is a design change rather
-  than a review fix, and it is the design that would be changing. Raised for
-  decision, not applied.
+* **That a transient `.foregroundInactive` scene should not run the fallback**
+  was raised for decision rather than applied, because it changes the design
+  rather than the code's fidelity to it. It was then decided and applied — see
+  below.
 * **That the debug `assert` escaping `requestReview()` is a defect.** It is
   deliberate and documented: a missing build-time constant is worth a red
   screen in debug, and release builds report the outcome. Only the wording
@@ -1268,3 +1280,59 @@ documentation fix, and README and CHANGELOG now say so.
 
 * Nothing. Every finding either held or was a design disagreement recorded
   above — the first round of this project where no claim was simply wrong.
+
+### The fallback no longer runs for a transient failure
+
+Decided after the review, and it reverses half of §6 and a bullet of §2.6.
+
+**The problem.** §6 made the Swift scene check honest: with no
+foreground-active scene, stop claiming a prompt was shown. §2.6 then routed
+that `false` into the `ReviewFallback`, and §6 accepted the consequence in
+writing — "the default behaviour sends the user to the App Store write-review
+page where 1.4.0 showed them nothing at all". But a scene is not
+foreground-active during the launch transition, while a system alert is up, or
+for a visible but unfocused iPad window. So an app asking for a review from a
+post-frame callback after a launch-count threshold — a common pattern — could
+eject the user to the App Store **with no interaction at all**. That is worse
+than the nothing 1.4.0 did, and it is a worse failure than the one §6 set out
+to fix.
+
+**Why a `bool` could not carry it.** The obvious fix is to use the two signals
+already in the interface: fall back when `isAvailable()` is false, and report
+rather than substitute when an available prompt returns false. That does not
+work, because `StoreKitInAppReview.isAvailable()` answers from the platform
+value alone — §6 deliberately deleted the channel round trip that used to ask —
+so it says `true` both on a device whose scene is inactive and on a host whose
+plugin never registered. Those two want opposite handling, and §2.6 explicitly
+asks for both: `MissingPluginException` "means the prompt is unavailable and
+the `ReviewFallback` runs", which is right, because no amount of waiting fixes
+a host that was not rebuilt.
+
+So the third state has to come from the prompt itself.
+
+**What changed.**
+
+* `InAppReviewPrompt.requestReview()` returns `InAppReviewRequest`
+  — `requested`, `notNow`, `unavailable` — instead of `bool`. A closed enum:
+  three states exhaust it.
+* The native side answers `"requested"` or `"noActiveScene"` instead of a
+  bool, which is also how the launcher channel already reports.
+* `StoreListingOutcome.inAppReviewNotNow` is new, and is the only unsuccessful
+  outcome worth retrying unchanged. `inAppReviewUnavailable` goes back to
+  meaning "not here", so a UI may hide a row on it — which the review had just
+  flagged as unsafe, and now is safe again.
+* `requestReview`'s `fallback` runs for `unavailable` and not for `notNow`,
+  whichever fallback was asked for.
+* `PreferredInAppReview` hands over to the built-in prompt only on
+  `unavailable`. A preferred prompt that said "not now" has answered; retrying
+  through a second prompt would turn one request from the caller into two
+  attempts at the user, and on iOS both would be looking at the same inactive
+  scene.
+
+**What this costs.** A seventh value in an enum documented as open to new
+values, and a seam signature that is harder to implement than
+`Future<bool>`. Both land before 2.0.0 is published, so neither is breaking.
+The seam is also the honest shape: the first implementation outside this
+package wraps Play's review flow, which distinguishes "the quota is exhausted
+right now" from "Play is not installed" — the same distinction, arrived at from
+the other platform.
