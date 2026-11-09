@@ -144,6 +144,11 @@ void main() {
       ).launchRequestReview();
 
       expect(result, isTrue);
+      // Exactly one launch, not two: the native prompt and the store listing
+      // are exclusive. This is the testable half of that guarantee — the iOS
+      // half (a successful native prompt must *not* also open the store) needs
+      // a host reporting `ios`, which the conditional-import platform global
+      // does not allow a test to fake.
       expect(launcher.launched, [
         'https://play.google.com/store/apps/details?id=design.codeux.authpass',
       ]);

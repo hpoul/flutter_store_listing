@@ -87,26 +87,34 @@ class FlutterStoreListing {
   Future<bool> _invokeRequestReview() async =>
       (await _channel.invokeMethod<bool>('requestReview')) as bool;
 
-  /// launches a 'requestReview' dialog on iOS. If not available launches
-  /// store URL externally.
+  /// Asks the user for a review: the native in-app dialog on iOS, otherwise
+  /// the store listing opened externally.
   ///
-  /// If [onlyNative] is true, will do nothing if the native dialog is not
-  /// available. (e.g. on android).
+  /// Returns true when a review was asked for by one route or the other. A
+  /// true from the native dialog means the request reached StoreKit, not that
+  /// a prompt appeared — StoreKit rate-limits it per user and per app version
+  /// and never reports back either way.
+  ///
+  /// When the native dialog is not available — any non-iOS platform, or iOS
+  /// with no window scene to present in — this falls back to
+  /// [launchStoreListing]. Set [onlyNative] to true to do nothing and return
+  /// false in that case instead.
+  ///
+  /// The native prompt and the store listing are deliberately exclusive: up to
+  /// 1.2.0 a successful native prompt on iOS *also* opened the store listing,
+  /// ejecting the user to the App Store straight after the in-app dialog, and
+  /// returned false for `onlyNative: true` precisely when the prompt had been
+  /// shown. Both were inversions of this doc comment; see CHANGELOG 1.3.0.
   Future<bool> launchRequestReview({bool onlyNative = false}) async {
-    if (_isIOS) {
-      if (await _invokeRequestReview()) {
-        if (onlyNative) {
-          return false;
-        }
-        return await launchStoreListing(iosWriteReview: true);
-      }
+    // Short-circuits before the channel call off iOS, where there is no
+    // native implementation to invoke.
+    if (_isIOS && await _invokeRequestReview()) {
       return true;
-    } else {
-      if (onlyNative) {
-        return false;
-      }
-      return await launchStoreListing();
     }
+    if (onlyNative) {
+      return false;
+    }
+    return await launchStoreListing(iosWriteReview: true);
   }
 
   /// Launches the URL for reviewing.

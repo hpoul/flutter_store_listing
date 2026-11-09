@@ -4,6 +4,23 @@
 generated `FlutterFramework` Swift package, which Flutter only produces from
 3.44.0 on.
 
+**Behaviour change: `launchRequestReview` no longer contradicts its own
+documentation.** It was inverted in both branches, so iOS callers got the
+opposite of what the API said:
+
+* A *successful* native prompt also opened the App Store write-review page,
+  ejecting the user to the App Store immediately after the in-app dialog. The
+  two are now exclusive — the store listing is the fallback for when the
+  native dialog is unavailable, which is what the doc comment always claimed.
+* `onlyNative: true` returned `false` precisely when the prompt *had* been
+  shown, and the iOS branch returned `true` when the native call had failed
+  and nothing at all had happened. Both are now the right way round: `true`
+  means a review was asked for, `false` means it was not.
+
+If you branch on the return value of `launchRequestReview()`, re-check it. If
+you call it for its side effect only, the visible change is that iOS users are
+no longer sent to the App Store after being shown the in-app prompt.
+
 * Allow `package_info_plus` 10.x (widened to `>=1.0.3 <11.0.0`). This was the
   only thing making version solving fail for apps that need
   `package_info_plus` 10.x.
