@@ -94,10 +94,15 @@ class FlutterStoreListingPlugin :
         val host = activity
         if (host == null) {
             // An error rather than an outcome, because this is a host problem
-            // worth surfacing and not a missing store. It is not a route to
-            // `url_launcher`: that plugin is `ActivityAware` too and is
-            // detached in the same window, so its own `ensureActivity` throws.
-            // The Dart side therefore treats this as "could not open".
+            // worth surfacing and not a missing store.
+            //
+            // Falling back to `url_launcher` cannot rescue it: that plugin is
+            // `ActivityAware` too and is detached in the same window, so its
+            // own `ensureActivity` throws. The Dart side does still attempt it
+            // — it catches `PlatformException` wholesale and retries — so this
+            // reaches the caller as `false` by way of that second failure
+            // rather than directly. Telling the two exceptions apart, and so
+            // skipping the pointless retry, is a 2.0 change.
             result.error(
                 ERROR_NO_ACTIVITY,
                 "No activity is attached; cannot open a store listing.",
