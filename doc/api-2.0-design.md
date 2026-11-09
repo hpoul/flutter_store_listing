@@ -1,7 +1,9 @@
 # flutter_store_listing 2.0 — API design, for review
 
-Status: **proposal, nothing implemented.**
+Status: **proposal, nothing implemented. Not yet implementable — see §9.**
 Revision 2, after an independent design review. §8 logs what changed and why.
+§9 lists what a second review found still wrong in revision 2; those are not
+yet fixed in the design below.
 
 The whole package is 190 lines of Dart plus 68 of Swift, so an overhaul is
 cheap. The expensive part is the public API, because it is published, so this
@@ -235,7 +237,20 @@ Deliberate choices:
   static built with defaults is broken, but the fix is a shared instance you
   *can* configure, not none at all. Without it, every call site has to thread
   the `InAppReviewPrompt` in by hand, and the identity memo would have instance
-  rather than process lifetime. `InAppReview.instance` is the same shape.
+  rather than process lifetime.
+
+  **Correction, and now an open issue.** Revision 2 claimed
+  "`InAppReview.instance` is the same shape". That is false, verified from
+  source: `in_app_review` declares `static final InAppReview instance =
+  InAppReview._();` — a private constructor and no setter. Its assignable seam
+  lives one layer down on its platform-interface package and is token-guarded.
+  So an *assignable* facade static has no precedent in either comparable
+  package (`share_plus` is `static final` too), and a lazily-initialised
+  mutable static has a real hazard: a read before assignment silently
+  constructs an unconfigured default and any reference captured then stays
+  stale forever, with no error. `example/lib/main.dart:22` already constructs
+  in a `State` field initialiser, which is one step from exactly that. See
+  item A in §9.
 * **`writeReview` defaults to `false`** on `openStoreListing`, inverting
   today's default. A method named for the listing should open the listing.
   `requestReview`'s *fallback* still defaults to the write-review page.
@@ -523,3 +538,100 @@ three were corrections to claims revision 1 got wrong.
 to `reviewPage` because Play has no write-review deep link. Kept the explicit
 name and documented the Android behaviour instead — the vaguer name would hide
 the asymmetry rather than explain it.
+
+---
+
+## 9. Unresolved — second review of revision 2
+
+Revision 2 was reviewed again. Verdict: **ship with changes, but not ready to
+implement as it stands.** The three structural decisions (outcomes instead of
+`bool`, platform-as-value, deleting the lookup) were judged right and are not
+in question. What follows is **not yet applied to the design above** — it is
+recorded so nobody implements from a document with known holes. Full reasoning
+is on PR #4 as a comment.
+
+**Blocking — a decision the document does not contain:**
+
+* **A. Which URL does `openStoreListing` open on Android?** §2.4 publishes both
+  `playStoreWebUri()` and `playStoreAppUri()`, §2.5 drops the `canLaunchUrl`
+  probe, and `storeListingUri()` is documented as "the URL `openStoreListing`
+  *would* open" — singular. Nothing says which. The two have opposite failure
+  modes: `market://` hard-fails on a device with no Play Store, which is
+  precisely the F-Droid audience this package deliberately serves, where 1.3.0
+  degraded gracefully. The https URL works everywhere and the Play app claims
+  it via app links. Recommendation: use https, and **drop `playStoreAppUri()`
+  from the public API** — item 14 is this document's own argument that the
+  `market://` path is dead by default, so publishing a new builder for it adds
+  API that cannot be withdrawn and has no caller.
+
+**Wrong as designed:**
+
+* **B. `isStoreListingSupported` contradicts `storeIdUnavailable`.** On iOS with
+  no `appStoreId` it returns true while `openStoreListing()` returns
+  `storeIdUnavailable` — so UI that gates a "Rate this app" row on the getter
+  renders a row that does nothing. That is item 5's conflation reappearing one
+  level up, in the API built to remove it. It is also synchronously fixable,
+  *because* deleting the lookup made the id a constructor argument: on Apple
+  platforms `appStoreId != null` is known at construction time.
+* **C. The assignable `static instance`** — see the correction in §2.4. Needs a
+  getter with a lazy default plus either `configure()` or a setter that throws
+  once the default has been handed out, so the silent stale-capture becomes
+  loud, and a `@visibleForTesting` reset so one test cannot leak into the next.
+* **D. `MissingPluginException` → `unsupportedPlatform` is wrong** (§2.6). Once
+  the platform is a value the channel is never called off Apple platforms, so
+  this exception can only mean the plugin failed to register *on a platform
+  that does have a store*. Reporting "this platform has no app store" about an
+  iPhone, and suppressing the store-listing fallback that would still have
+  worked, is backwards. Map it to the in-app-review-unavailable path so the
+  `ReviewFallback` runs.
+* **E. The missing id should be loud in debug.** §5 identifies this as "the one
+  thing that breaks a consumer silently if missed" and then ships it. Keep
+  `storeIdUnavailable` as the release-mode outcome — an app can legitimately
+  run unconfigured — but add `assert(appStoreId != null, …)` on the Apple path.
+
+**Smaller, agreed:**
+
+* **F.** Express the built-in iOS StoreKit path as an `InAppReviewPrompt`
+  implementation rather than a hardcoded channel call, or §4's "every branch
+  reachable from `flutter test`" stays aspirational: `static const
+  MethodChannel _channel` has no seam, so no test can reach the iOS prompt.
+* **G.** State in `InAppReviewPrompt`'s contract that implementations must not
+  throw and must report unavailability as `false`. The first implementor is
+  `flutter_store_listing_play_review`, and Play's `ReviewManager` does throw.
+* **H.** Document that `StoreListingOutcome` may gain values in minor versions
+  and that consumers should keep a `default`. Dart 3 makes an exhaustive switch
+  a hard error, so a seventh outcome in 2.1 would break every consumer who
+  switched exhaustively — a larger lock-in than the one §2.1 accepts.
+* **I.** `storeListingUri()` is `Future<Uri?>` for a job that is synchronous on
+  Apple platforms once `appStoreId` is a constructor argument. Only Android's
+  default package name needs I/O. A sync overload would save a `FutureBuilder`.
+* **J.** The Swift scene fix is **one** line (delete `?? scenes.first`), not
+  three, and it has a user-visible consequence that belongs in the CHANGELOG:
+  with no foreground-active scene, iOS now runs the `ReviewFallback`, so the
+  default sends the user to the App Store where 1.3.0 showed nothing.
+* **K.** §7's open question is already moot — `appStoreUri()` takes no scheme
+  parameter, so the design has answered "no `itms-apps://`". Close it, and
+  delete the assertion at `test/flutter_store_listing_test.dart:51` that
+  "tests" that unverified form.
+
+**Four more decisions an implementer would otherwise have to invent:** which
+URL `storeListingUri()` describes; whether `storeId()` returns `appStoreId` or
+`macAppStoreId` on macOS; whether the iOS StoreKit path goes through the seam
+(F); and how `resolveStorePlatform()` preserves 1.3.0's deliberate choice of
+`dart:io`'s `operatingSystem` over `defaultTargetPlatform` — the current
+`lib/src/platform_os_io.dart` documents why, and nothing in §2.3 carries that
+reasoning forward.
+
+**§5's migration is incomplete in four more places:** the example app would
+demonstrate the failure mode (it constructs with no `appStoreId`, so its id
+display reads "store id not found" forever on iOS, and §5 never says what
+`example/lib/main.dart:22` becomes); the README's usage block and platform
+table are not mentioned at all; desktop and web flip from `true` to
+`isSuccess == false`, which is a *second* silent behaviour change where §5
+claims one; and `test/flutter_store_listing_test.dart` is a wholesale rewrite
+that §5 does not list.
+
+**One claim from the review not verified:** it quoted an
+`ArgumentError.checkNotNull(appStoreId, …)` in `in_app_review`. That line is
+not in the version of `in_app_review.dart` checked here, so it is not relied
+on above. The argument for loudness (E) stands on its own.
