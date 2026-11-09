@@ -66,20 +66,19 @@ jobs:
           flutter pub get
           flutter build apk --debug
 
-      # The Flutter example .gitignore keeps `gradlew` and the wrapper jar out
-      # of the repository, so there is no wrapper to invoke here and the
-      # version is pinned instead of read from gradle-wrapper.properties.
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.14.3'
-
+      # `./gradlew` exists by now even though the example .gitignore keeps it
+      # out of the repository: `flutter build` above copies the wrapper from the
+      # Flutter cache when it is missing, leaving the committed
+      # gradle-wrapper.properties in place. So this honours the same Gradle
+      # version as the build, with no second distribution to download.
+      #
       # `lintDebug` as well as the unit tests, because the module turns
       # `checkAllWarnings` and `warningsAsErrors` on and a strict lint config
       # nothing ever runs is not a config.
       - name: Test and lint the Android plugin
         working-directory: example/android
         run: >
-          gradle --console=plain
+          ./gradlew --console=plain
           :flutter_store_listing:testDebugUnitTest
           :flutter_store_listing:lintDebug
 

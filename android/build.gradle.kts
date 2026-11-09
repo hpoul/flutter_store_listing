@@ -38,13 +38,15 @@ kotlin {
 android {
     namespace = "design.codeux.flutter_store_listing"
 
-    // Follows the including app rather than pinning a version here, so a
-    // consumer on a newer Flutter does not have to wait for this package.
+    // Follows the Flutter SDK's own value rather than pinning one here, so a
+    // consumer on a newer Flutter does not have to wait for this package. Note
+    // this tracks the SDK, not the consuming app.
     compileSdk = flutter.compileSdkVersion
 
     defaultConfig {
-        // Flutter's own floor as of 3.44; there is nothing in here that needs
-        // anything newer.
+        // Flutter's own floor as of 3.44, and the same value url_launcher_android
+        // declares — so any app already pulling url_launcher is at 24 anyway.
+        // It is a manifest-merger floor for consumers, hence the CHANGELOG note.
         minSdk = 24
     }
 
@@ -60,17 +62,9 @@ android {
         // never queries for a handler, it attempts the intent and handles
         // ActivityNotFoundException, which is what Android documents and what
         // needs no `<queries>` entry in a consumer's manifest.
-        disable.addAll(
-            setOf(
-                "AndroidGradlePluginVersion",
-                "GradleDependency",
-                "NewerVersionAvailable",
-                // Wants `url.toUri()` over `Uri.parse(url)`, which means taking
-                // androidx.core as a dependency of this module. One call site
-                // is not worth that, given the module has none at all.
-                "UseKtx",
-            ),
-        )
+        // `UseKtx` is suppressed at its one call site rather than here, so the
+        // check stays live for code added later.
+        disable.addAll(setOf("AndroidGradlePluginVersion", "GradleDependency", "NewerVersionAvailable"))
     }
 
     testOptions {
@@ -85,9 +79,9 @@ dependencies {
     // No `implementation` dependencies at all: no androidx, and in particular
     // no Play Core. Opening a store listing is one intent, and Play's in-app
     // review API is deliberately kept out of this package so it stays free of
-    // proprietary dependencies — see the note in pubspec.yaml.
+    // proprietary dependencies — see the note in pubspec.yaml. The test
+    // dependencies below are resolved only when these tests are run.
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.mockito:mockito-core:5.23.0")
-    testImplementation("androidx.test:core:1.7.0")
     testImplementation("org.robolectric:robolectric:4.16")
 }

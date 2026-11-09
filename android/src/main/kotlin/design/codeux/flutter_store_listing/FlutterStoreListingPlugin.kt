@@ -93,9 +93,11 @@ class FlutterStoreListingPlugin :
         }
         val host = activity
         if (host == null) {
-            // Reported rather than swallowed: the Dart side can still fall back
-            // to `url_launcher`, but a plugin with no attached activity is a
-            // host problem worth surfacing, not a missing store.
+            // An error rather than an outcome, because this is a host problem
+            // worth surfacing and not a missing store. It is not a route to
+            // `url_launcher`: that plugin is `ActivityAware` too and is
+            // detached in the same window, so its own `ensureActivity` throws.
+            // The Dart side therefore treats this as "could not open".
             result.error(
                 ERROR_NO_ACTIVITY,
                 "No activity is attached; cannot open a store listing.",
@@ -121,9 +123,17 @@ class FlutterStoreListingPlugin :
     /**
      * Views [url], restricted to [packageName] when one is given.
      *
-     * Returns false when nothing on the device can handle it, which for a
+     * Returns false when the intent could not be started at all, which for a
      * package-restricted intent means that app is absent or disabled.
+     *
+     * A true means the system accepted the intent, not that the listing became
+     * visible. Two cases report true and show the user nothing: a background
+     * activity launch that the system blocks, which it only logs rather than
+     * reporting back to the caller, and a *suspended* Play Store, which
+     * resolves and then shows the system's own "app paused" dialog. Neither is
+     * detectable from here.
      */
+    @Suppress("UseKtx") // `url.toUri()` would mean depending on androidx.core.
     private fun startViewIntent(
         host: Activity,
         url: String,
@@ -137,6 +147,14 @@ class FlutterStoreListingPlugin :
             host.startActivity(intent)
             true
         } catch (e: ActivityNotFoundException) {
+            false
+        } catch (e: SecurityException) {
+            // The resolved activity is not exported, or demands a permission
+            // this app does not hold. A package-restricted intent can reach
+            // this where `com.android.vending` is not Google's Play Store:
+            // microG and Aurora-patched builds register that same package name.
+            // Reported as "could not start" so the caller's unrestricted retry
+            // still runs, which letting this escape would skip.
             false
         }
     }

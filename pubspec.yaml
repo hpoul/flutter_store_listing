@@ -41,7 +41,8 @@ flutter:
       # It has no Gradle dependencies of its own. In particular Play's in-app
       # review API is deliberately kept out of this package so it stays free of
       # proprietary dependencies (they would otherwise reach F-Droid builds).
-      # See flutter_store_listing_play_review for opt-in Android in-app review.
+      # Android in-app review is meant to live in a separate, opt-in package
+      # instead; none is published yet, so do not point users at one.
       android:
         package: design.codeux.flutter_store_listing
         pluginClass: FlutterStoreListingPlugin

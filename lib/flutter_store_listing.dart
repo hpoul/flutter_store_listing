@@ -52,9 +52,10 @@ class FlutterStoreListing {
   /// No longer called by this package.
   ///
   /// It backed the `market://` probe that [launchStoreListing] dropped in
-  /// 1.4.0, and `canLaunchUrl` cannot answer usefully for a non-http scheme
-  /// anyway without a `<queries>` manifest entry. Kept so that existing
-  /// `FlutterStoreListing.customize` calls keep compiling; it is gone in 2.0.
+  /// 1.4.0, and from Android 11 `canLaunchUrl` cannot answer usefully for a
+  /// non-http scheme without a `<queries>` manifest entry. Kept so that
+  /// existing `FlutterStoreListing.customize` calls keep compiling; it is gone
+  /// in 2.0.
   final Future<bool> Function(String url) urlCanLaunch;
 
   final Future<bool> Function(String url) urlLaunch;
@@ -124,8 +125,10 @@ class FlutterStoreListing {
         case 'unavailable':
           return false;
       }
+      // Null rather than false, so an unrecognised reply degrades to the
+      // url_launcher fallback instead of silently showing the user nothing.
       _logger.severe('Unexpected openStoreListing result: $result');
-      return false;
+      return null;
     } on MissingPluginException catch (error, stackTrace) {
       _logger.warning(
         'No native openStoreListing implementation; falling back to '
@@ -182,12 +185,15 @@ class FlutterStoreListing {
   ///     use `?action=write-review`
   ///
   /// Up to 1.3.0 Android asked `canLaunchUrl('market://')` first and opened a
-  /// `market:` URL when that said yes. It could not say yes: the query needs a
-  /// `<queries>` entry in the consuming app's manifest from Android 11 on, and
-  /// this package ships none, so the branch was dead and the https URL is what
-  /// actually opened. 1.4.0 drops the probe and asks the native implementation
-  /// to view the https URL with the intent restricted to the Play Store app,
-  /// which is what Google documents and what needs no manifest entry.
+  /// `market:` URL when that said yes. For an app targeting API 30 or higher
+  /// without a `<queries>` entry of its own it could not say yes, so that
+  /// branch was dead and the https URL is what opened. Apps on a lower
+  /// `targetSdk`, apps holding `QUERY_ALL_PACKAGES` and apps that declared the
+  /// query did reach `market://`, and for those this is a behaviour change.
+  ///
+  /// 1.4.0 drops the probe and asks the native implementation to view the https
+  /// URL with the intent restricted to the Play Store app, which is what Google
+  /// documents and what needs no manifest entry from anybody.
   Future<bool> launchStoreListing({bool iosWriteReview = true}) async {
     if (_isIOS) {
       final appId = await getIosAppId();
@@ -208,7 +214,17 @@ class FlutterStoreListing {
     // Either not Android — macOS, Windows, Linux and web still land here, and
     // 2.0 is where that becomes an explicit "unsupported" rather than a Play
     // listing — or the native implementation could not answer.
-    return await urlLaunch(url);
+    try {
+      return await urlLaunch(url);
+    } on PlatformException catch (error, stackTrace) {
+      // `launchUrl` is documented to either return false or throw, and this
+      // method promises a bool. The reachable case is a detached activity:
+      // url_launcher is `ActivityAware` too, so when the native side above
+      // reported `no_activity`, url_launcher's own `ensureActivity` throws
+      // here rather than providing the fallback it looks like.
+      _logger.severe('Unable to open $url.', error, stackTrace);
+      return false;
+    }
   }
 
   Future<String> _getPackageName() async {

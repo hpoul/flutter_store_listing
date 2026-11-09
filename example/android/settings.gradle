@@ -19,11 +19,13 @@ pluginManagement {
 plugins {
     id "dev.flutter.flutter-plugin-loader" version "1.0.0"
     id "com.android.application" version '8.13.1' apply false
-    // Needed since the plugin itself gained an Android implementation: the
-    // Flutter Gradle plugin checks the Kotlin version declared here, and
-    // without a declaration it resolves to the one AGP brings along (2.0.0),
-    // which is below Flutter's minimum of 2.2.20. Keep in step with the
-    // `kotlinVersion` in ../../android/build.gradle.kts.
+    // This example predates the current Flutter template, which declares the
+    // Kotlin plugin here by default. Without a declaration the Flutter Gradle
+    // plugin's version check resolves to the Kotlin that AGP brings along
+    // (2.0.0), below its 2.2.20 floor, and the build fails. The check runs
+    // against this app whatever its plugins ship, so this is the template
+    // catching up rather than a requirement of the Android implementation
+    // added alongside it, and consumers need nothing like it.
     id "org.jetbrains.kotlin.android" version '2.3.20' apply false
 }
 

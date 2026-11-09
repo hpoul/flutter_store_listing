@@ -3,7 +3,9 @@ package design.codeux.flutter_store_listing
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import org.junit.Assert.assertEquals
@@ -12,6 +14,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.ArgumentCaptor
+import org.mockito.ArgumentMatchers
 import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito
 import org.mockito.Mockito.doAnswer
@@ -24,10 +27,11 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Runs under Robolectric for real [Intent] and `Uri` behaviour — with the
- * stubbed `android.jar` of a plain JVM test, `Uri.parse` returns null and
- * `intent.package` is meaningless, so the assertions below would all pass
- * vacuously.
+ * Runs under Robolectric for real [Intent] and `Uri` behaviour. With the
+ * stubbed `android.jar` of a plain JVM test, `intent.action`, `intent.data` and
+ * `intent.package` all come back null, so the assertions on them would fail
+ * rather than pass vacuously — but they would be testing the stub instead of
+ * the intent this plugin actually builds, which is the whole point of them.
  *
  * Pinned to SDK 34 rather than following `compileSdk`, so that a Flutter
  * upgrade bumping `compileSdk` cannot break these tests on a Robolectric
@@ -128,6 +132,28 @@ internal class FlutterStoreListingPluginTest {
     }
 
     @Test
+    fun `retries when the package-restricted intent is refused`() {
+        // A SecurityException rather than an ActivityNotFoundException: the
+        // package resolves but its activity is not startable by this app, which
+        // is reachable where `com.android.vending` is some other build's
+        // package. Letting it escape would skip the unrestricted retry.
+        doAnswer { invocation ->
+            val intent = invocation.getArgument<Intent>(0)
+            if (intent.`package` != null) {
+                throw SecurityException("not exported")
+            }
+            null
+        }.`when`(activity).startActivity(any(Intent::class.java))
+
+        openStoreListing()
+
+        val intents = startedIntents(2)
+        assertEquals(PLAY_STORE_PACKAGE, intents[0].`package`)
+        assertNull(intents[1].`package`)
+        verify(result).success(FlutterStoreListingPlugin.RESULT_EXTERNAL)
+    }
+
+    @Test
     fun `skips the package attempt when none is given`() {
         openStoreListing(preferredPackage = null)
 
@@ -141,6 +167,39 @@ internal class FlutterStoreListingPluginTest {
 
         verify(activity, never()).startActivity(any(Intent::class.java))
         assertEquals(FlutterStoreListingPlugin.ERROR_INVALID_ARGUMENTS, reportedErrorCode())
+    }
+
+    @Test
+    fun `rejects an empty URL rather than viewing nothing`() {
+        openStoreListing(url = "")
+
+        verify(activity, never()).startActivity(any(Intent::class.java))
+        assertEquals(FlutterStoreListingPlugin.ERROR_INVALID_ARGUMENTS, reportedErrorCode())
+    }
+
+    @Test
+    fun `treats an empty package like no package`() {
+        openStoreListing(preferredPackage = "")
+
+        assertNull(startedIntents(1).single().`package`)
+        verify(result).success(FlutterStoreListingPlugin.RESULT_EXTERNAL)
+    }
+
+    @Test
+    fun `registers on the channel the Dart and iOS sides use`() {
+        // The one string that has to match three implementations. Asserting the
+        // constant alone would prove nothing; this proves `onAttachedToEngine`
+        // registers under it.
+        val messenger = mock(BinaryMessenger::class.java)
+        val binding = mock(FlutterPlugin.FlutterPluginBinding::class.java)
+        Mockito.`when`(binding.binaryMessenger).thenReturn(messenger)
+
+        plugin.onAttachedToEngine(binding)
+
+        verify(messenger).setMessageHandler(
+            ArgumentMatchers.eq("flutter_store_listing"),
+            ArgumentMatchers.any(),
+        )
     }
 
     @Test

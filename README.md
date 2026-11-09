@@ -25,10 +25,17 @@ the package restriction, and whatever else handles Play links takes it.
 **Your app needs no `<queries>` manifest entry for this.** The implementation
 attempts the intent and handles `ActivityNotFoundException`, which Android's
 package visibility rules do not filter — unlike `canLaunchUrl` and
-`queryIntentActivities`, which they do. Up to 1.3.0 this package probed
-`canLaunchUrl('market://')` and opened a `market://` URL when that said yes;
-from Android 11 on it could not say yes without a manifest entry this package
-does not ship, so that branch was dead and the https URL is what opened.
+`queryIntentActivities`, which they do.
+
+Up to 1.3.0 this package probed `canLaunchUrl('market://')` and opened a
+`market://` URL when that said yes. For an app targeting API 30 or higher it
+could not say yes, so the branch was dead and the https URL is what opened;
+apps on a lower `targetSdk`, apps holding `QUERY_ALL_PACKAGES` and apps that
+declared the query themselves did reach `market://`. A plugin can contribute a
+`<queries>` entry to the app's merged manifest, so that was fixable without
+native code — but `setPackage` is not expressible through `url_launcher` at
+all, and Google no longer documents `market://` for store listings, which is
+why the native route won.
 
 The Android side has no Gradle dependencies at all. Play's in-app review API
 is deliberately left out of this package to keep it free of proprietary
