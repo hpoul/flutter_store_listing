@@ -1,7 +1,7 @@
 name: flutter_store_listing
 description: Flutter plugin to handle app reviews with the StoreKit review API,
   generate app store links and open them for iOS or android.
-version: 1.4.0
+version: 2.0.0
 homepage: https://github.com/hpoul/flutter_store_listing
 repository: https://github.com/hpoul/flutter_store_listing
 issue_tracker: https://github.com/hpoul/flutter_store_listing/issues
@@ -13,7 +13,8 @@ environment:
   flutter: ">=3.44.0"
 
 dependencies:
-  http: ">=0.13.0 <2.0.0"
+  # No `http`: 2.0 deleted the iTunes `/lookup` call that was its only use, so
+  # consumers of a store-listing plugin no longer carry an HTTP client.
   package_info_plus: ">=1.0.3 <11.0.0"
   url_launcher: ">=6.0.2 <7.0.0"
   logging: ">=1.0.0 <2.0.0"

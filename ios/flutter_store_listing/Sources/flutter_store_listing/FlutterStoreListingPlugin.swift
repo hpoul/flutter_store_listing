@@ -14,9 +14,11 @@ public class FlutterStoreListingPlugin: NSObject, FlutterPlugin {
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
-    case "isSupportedRequestReview":
-      // Every deployment target this plugin supports can request a review.
-      result(true)
+    // `isSupportedRequestReview` is gone: it answered `true` unconditionally,
+    // so Dart paid a channel round trip for a constant. `isInAppReviewSupported`
+    // is a synchronous getter there now, and whether a prompt can actually be
+    // shown is resolved by `requestReview` below, which is the only place it
+    // can honestly be known.
     case "requestReview":
       requestReview(result: result)
     default:
@@ -26,10 +28,12 @@ public class FlutterStoreListingPlugin: NSObject, FlutterPlugin {
 
   /// Asks StoreKit to show the review prompt.
   ///
-  /// Reports `false` only when there is no window scene to present in. A `true`
-  /// result means the request was handed to StoreKit, not that a prompt was
-  /// actually shown: StoreKit decides that, and rate-limits it per user and
-  /// per app version without telling the caller either way.
+  /// Reports `false` when there is no foreground-active window scene to
+  /// present in, which the Dart side treats as "the prompt is unavailable" and
+  /// answers with the caller's `ReviewFallback`. A `true` result means the
+  /// request was handed to StoreKit, not that a prompt was actually shown:
+  /// StoreKit decides that, and rate-limits it per user and per app version
+  /// without telling the caller either way.
   private func requestReview(result: @escaping FlutterResult) {
     Task { @MainActor in
       guard let scene = Self.activeWindowScene() else {
@@ -62,11 +66,17 @@ public class FlutterStoreListingPlugin: NSObject, FlutterPlugin {
     SKStoreReviewController.requestReview(in: scene)
   }
 
-  /// The scene to present the prompt in: the foreground-active one where
-  /// possible, otherwise any connected window scene.
+  /// The foreground-active window scene, or nil.
+  ///
+  /// Deliberately *only* the foreground-active one. This used to fall back to
+  /// `scenes.first`, and `connectedScenes` is a `Set`, so that was an
+  /// arbitrary member — the prompt was then presented into a possibly
+  /// background scene and `true` reported for it. Returning nil instead lets
+  /// the Dart side run its `ReviewFallback`, which can at least send the user
+  /// somewhere they will see.
   @MainActor
   private static func activeWindowScene() -> UIWindowScene? {
     let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-    return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+    return scenes.first { $0.activationState == .foregroundActive }
   }
 }

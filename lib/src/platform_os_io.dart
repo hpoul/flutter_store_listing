@@ -10,5 +10,8 @@ import 'dart:io' as io;
 /// *emulating*. An app that sets `debugDefaultTargetPlatformOverride` would
 /// otherwise make us invoke an iOS-only method channel on Android.
 ///
+/// Mapped onto a `StorePlatform` by `resolveStorePlatform()`, which carries
+/// the same reasoning in its own doc comment.
+///
 /// See `platform_os_web.dart` for the counterpart the web build gets.
 String get operatingSystem => io.Platform.operatingSystem;
