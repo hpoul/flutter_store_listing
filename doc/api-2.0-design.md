@@ -9,7 +9,7 @@ The third review found one defect that outranks everything in §9: in 2.0 as
 revision 3 drew it, `FlutterStoreListing()` still compiles and silently stops
 being the configured instance. Both reviewers found it independently. See §5.
 
-The whole package is 303 lines of Dart, 72 of Swift and 183 of Kotlin, so an
+The whole package is 310 lines of Dart, 72 of Swift and 188 of Kotlin, so an
 overhaul is cheap. The expensive part is the public API, because it is
 published, so this document is about getting that right before any code moves.
 
@@ -42,7 +42,7 @@ against the code on `modernize-1.3.0`.
 
 | # | Problem | Consequence |
 |---|---|---|
-| 1 | `_isIOS` / `_isAndroid` come from a compile-time conditional import | No test can choose a platform. **Four** existing tests reach the Android branch, only because the host is neither iOS nor Android — `macos` locally but `linux` in CI, which runs `flutter test` on `ubuntu-latest`. Revision 3 said five, and said `macos` as though it were the only case; the test file's own comments say the same |
+| 1 | `_isIOS` / `_isAndroid` come from a compile-time conditional import | No test can choose a platform. **Four** existing tests reach the Android branch, only because the host is neither iOS nor Android — `macos` locally but `linux` in CI, which runs `flutter test` on `ubuntu-latest`. Revision 3 said five, and said `macos` as though it were the only case; the test file's own comments said the same until #6 |
 | 2 | `if (_isIOS) … else …` | web, macOS, Windows and Linux all fall into the **Android** branch. On macOS it opens a Play Store *web* page for a macOS bundle id — live today in AuthPass, which ships on macOS |
 | 3 | `getIosAppId()` does an **iTunes `/lookup` call** on every iOS `launchStoreListing()` that did not pass `forceIosAppId` | A network round trip to discover a build-time constant, and it fails offline. Worse, see 3a–3c |
 | 3a | that lookup passes no `country`, so it searches the **US storefront only** | an app not published in the US gets `results: []` → `null` → permanent failure, not just an offline one |
@@ -66,15 +66,18 @@ Item 14 is the only one 1.4.0 closed. Items 2, 3, 4, 10, 11 and 13 are all
 still live in the released package — the `else` branch still catches macOS,
 Windows, Linux and web, and the iTunes lookup is still there.
 
-**1.4.0 is on `master` but not published to pub.dev**, and item 14's wrong
-premise is repeated in `README.md` and in the 1.4.0 `CHANGELOG.md` entry. Those
-two are consumer-facing and fixable before the release goes out; this document
-is not blocking on them, but they should not ship as they stand. The *conclusion*
-in the CHANGELOG — "for most users this is the behaviour they already had" — is
-right, and more right than its reasoning: a Play-installed app on 1.3.0 reached
-`market://details?id=…`, which the Play Store app handles, and 1.4.0 sends the
-https URL to that same app. Nearly every user lands in the same place by a
-different route. It is the explanation, not the behaviour, that needs correcting.
+**Corrected before 1.4.0 shipped, in #6.** Item 14's wrong premise had been
+repeated in `README.md`, the 1.4.0 `CHANGELOG.md` entry, the published dartdoc
+on `launchStoreListing` and `urlCanLaunch`, and a test comment. All five are
+fixed, and 1.4.0 then went to pub.dev, so no consumer ever saw the wrong
+explanation.
+
+The *conclusion* in the CHANGELOG — "for most users this is the behaviour they
+already had" — was right all along, and more right than the reasoning offered
+for it: a Play-installed app on 1.3.0 reached `market://details?id=…`, which the
+Play Store app handles, and 1.4.0 sends the https URL to that same app. Nearly
+every user lands in the same place by a different route. It was the explanation,
+not the behaviour, that needed correcting.
 
 ---
 
@@ -531,10 +534,11 @@ both, so this is settled explicitly:
   wholesale, returns null, and the caller *does* then call `urlLaunch` — which
   throws and is caught, so the outcome is the same `false` by a longer route.
   2.0 has to tell `MissingPluginException` (fall back) from `PlatformException`
-  (do not). The Kotlin comment at `FlutterStoreListingPlugin.kt:96-100` asserts
-  the Dart side already distinguishes them; it does not, so that comment is
-  wrong in shipped 1.4.0 — the second comment in this area to claim a Dart
-  behaviour that was not there.
+  (do not). The Kotlin comment there used to assert that the Dart side already
+  distinguishes them — the second comment in that file to claim a Dart
+  behaviour that was not present — and #6 corrected it to describe the retry
+  that actually happens, so the code now documents the gap 2.0 closes rather
+  than denying it.
 * `MissingPluginException` → **not** `unsupportedPlatform`. Revision 2 had this
   backwards. Once the platform is a value the channel is never called on a
   platform that has no store, so this exception can only mean the plugin failed
@@ -864,8 +868,8 @@ version alone — true on iOS, false elsewhere — leaving scene availability to
   which is what revision 3 said: §2.6 requires `no_activity` to stop routing to
   url_launcher, so `MissingPluginException` and `PlatformException` have to be
   caught separately instead of both returning null. Small, but it is a
-  behaviour change rather than a translation — and it also makes a Kotlin
-  comment true that is wrong today.
+  behaviour change rather than a translation, and the Kotlin comment there now
+  describes the retry rather than denying it (#6), so the two will agree.
 
 ---
 
@@ -1090,10 +1094,11 @@ them do not.
   Android makes "the app that installed your app" automatically visible, so on
   any Play-installed device the `market://` probe was *not* filtered and the
   branch was not dead. Revision 1 was too broad, revision 3 narrowed it and
-  still omitted the majority case. **This same reasoning is shipped in
-  `README.md` and the 1.4.0 `CHANGELOG.md`**, which are consumer-facing and not
-  yet published — worth correcting before the release goes out. The CHANGELOG's
-  conclusion is right and its explanation is not.
+  still omitted the majority case. The same reasoning had been shipped in
+  `README.md`, the 1.4.0 `CHANGELOG.md`, the published dartdoc and a test
+  comment; **#6 corrected all of them before 1.4.0 went to pub.dev**, so no
+  consumer saw it. The CHANGELOG's conclusion was right and its explanation
+  was not.
 * **"1.4.0 already behaves this way" for `MissingPluginException`** — true of
   the launcher, false of the review prompt, which has no `try`/`catch` at all.
   The claim would have cost an implementer the handler 2.0 needs.
