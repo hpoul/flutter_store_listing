@@ -9,27 +9,47 @@ than a window scene. That premise was right, and the SDK says so exactly:
 
 * **`isInAppReviewSupported` answers true on macOS**, where it answered false.
   A widening, which is what makes this a minor release: UI that gated on the
-  getter gains a working prompt, and a caller that was relying on
-  `ReviewFallback.writeReviewPage` gets the native dialog instead of a web
-  page. If you want the old behaviour on macOS, pass
-  `ReviewFallback.writeReviewPage` to `openStoreListing` rather than
-  `requestReview`.
+  getter gains a working prompt.
+* **Read this one if your Mac app has a "Rate this app" button.** On 2.0,
+  `requestReview()` on macOS always fell back to the write-review page, so a
+  button wired to it opened the Mac App Store every time. On 2.1 it asks
+  StoreKit instead — which is rate-limited per user and per app version and
+  usually shows nothing, while still reporting `inAppReviewRequested` and
+  `isSuccess == true`. A deterministic action has become a best-effort one.
+  For a control the user pressed deliberately, call
+  `openStoreListing(writeReview: true)` instead; `requestReview()` is for the
+  prompt you ask for on the app's own initiative.
 * **One Swift source tree for both Apple platforms.** `ios/` is now `darwin/`,
   with `sharedDarwinSource: true` on both platform entries, one podspec and one
-  `Package.swift`. Nothing changes for consumers — Flutter resolves the new
-  path itself, under CocoaPods and Swift Package Manager alike — and the two
-  platforms differ in a single `#if os(macOS)`.
+  `Package.swift`. There is nothing to change in your own code — Flutter
+  resolves the new path itself, under CocoaPods and Swift Package Manager
+  alike. A CocoaPods project will see its `Podfile.lock` rewritten with the new
+  path on the next `pod install`, which matters only if you run it with a
+  frozen lockfile in CI.
 * **macOS 12 is still supported.** The modern API needs macOS 13; below that
   the prompt falls back to the deprecated no-argument
   `SKStoreReviewController.requestReview()`, rather than the package raising
   Flutter's own floor for one call.
-* **A new `noPresenter` reply maps to `inAppReviewNotNow`**, macOS's version of
-  iOS's `noActiveScene`: no view controller, so no window to present in, so no
-  fallback. The iOS spelling is still read rather than renamed, because
-  upgrading this package without rebuilding the host leaves an older compiled
-  plugin answering newer Dart code.
+* **A new `noPresenter` reply maps to `inAppReviewUnavailable`**, so the
+  fallback runs. It means there is no visible window to present into. That is
+  *not* macOS's version of iOS's `noActiveScene`, which suppresses the
+  fallback because it is transient — see below.
+* **`StoreKitInAppReview.supportsPlatform` is new**, a static synchronous
+  answer to "does this package ship a prompt for this platform".
 
-### One bug found on the way
+### Two bugs found on the way
+
+**The first draft suppressed the fallback on a windowless Mac.** `noPresenter`
+was mapped to `inAppReviewNotNow` by analogy with iOS, on the reasoning that a
+store page is no more showable than a dialog when there is nowhere to show it.
+That reasoning was wrong: on macOS the listing opens in the Mac App Store
+*app*, a separate process needing no window in the calling app. A host with no
+visible window — a status-item app, or one whose window has been closed —
+would have got nothing at all on 2.1 where 2.0 opened the write-review sheet,
+and would have gone on getting nothing, since such an app need never grow a
+window. It is `inAppReviewUnavailable` now, and the native side checks for a
+visible window rather than merely a view controller, so a hidden or minimised
+window reaches the fallback too.
 
 **`isInAppReviewSupported` kept its own copy of the platform list.** The getter
 is synchronous and `InAppReviewPrompt.isAvailable()` is not, so the same fact

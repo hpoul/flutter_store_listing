@@ -52,9 +52,9 @@ flutter:
       # Package.swift, all under `darwin/`, which is what `sharedDarwinSource`
       # selects. The two platforms differ in exactly one place — iOS presents
       # the review prompt into a `UIWindowScene` and macOS into an
-      # `NSViewController` — and that is a `#if os(macOS)` in one file rather
-      # than a second copy of the plugin, or the symlink the alternative layout
-      # would need.
+      # `NSViewController` — and that lives in `#if os(macOS)` blocks in one
+      # file rather than a second copy of the plugin, or the symlink the
+      # alternative layout would need.
       ios:
         pluginClass: FlutterStoreListingPlugin
         sharedDarwinSource: true

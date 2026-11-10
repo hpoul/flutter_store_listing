@@ -32,6 +32,17 @@ jobs:
       - name: Verify the tree is clean after pub get
         run: git diff --exit-code
 
+      # The podspec carries its own version and nothing resolves it from
+      # pubspec.yaml, which is how it sat at 1.3.0 through the whole of 2.0.
+      # It is not harmless: a CocoaPods consumer sees that number in their
+      # Podfile.lock, so a stale one misreports which version they are on.
+      - name: Verify the podspec version matches pubspec.yaml
+        run: |
+          pubspec=$(sed -nE 's/^version: (.*)$/\1/p' pubspec.yaml)
+          podspec=$(sed -nE "s/^ *s\.version *= *'(.*)'.*$/\1/p" darwin/flutter_store_listing.podspec)
+          echo "pubspec.yaml: '$pubspec'  podspec: '$podspec'"
+          test -n "$pubspec" && test "$pubspec" = "$podspec"
+
       - name: Analyze
         run: flutter analyze --fatal-infos
 

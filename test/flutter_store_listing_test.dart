@@ -698,6 +698,71 @@ void main() {
       expect(calls, ['requestReview']);
       expect(outcome, StoreListingOutcome.inAppReviewRequested);
     });
+
+    test('macOS reaches StoreKit through the real resolution', () async {
+      // The macOS counterpart of the test above. Until 2.1 the built-in prompt
+      // reported itself unavailable here and the channel was never called.
+      TestWidgetsFlutterBinding.ensureInitialized();
+      const channel = MethodChannel('flutter_store_listing');
+      final calls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            return 'requested';
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+
+      final launcher = _FakeLauncher();
+      final outcome = await _subject(
+        platform: StorePlatform.macOS,
+        macAppStoreId: '1478552452',
+        launcher: launcher,
+      ).requestReview();
+
+      expect(calls, ['requestReview']);
+      expect(outcome, StoreListingOutcome.inAppReviewRequested);
+      // The prompt and the listing are mutually exclusive, which 1.2.0 got
+      // wrong on iOS by doing both.
+      expect(launcher.opened, isEmpty);
+    });
+
+    test('a windowless Mac still gets the write-review page', () async {
+      // The whole macOS "no presenter" path, end to end, through the real
+      // StoreKit prompt rather than a composite built by hand.
+      //
+      // Both halves of this were asserted separately — that `noPresenter`
+      // maps to `unavailable`, and that `unavailable` runs the fallback — and
+      // never together. That is the exact shape of the bug this release found,
+      // so the path that the first draft of 2.1 got wrong is now covered as
+      // one piece: had `noPresenter` stayed mapped to `notNow`, this would
+      // report `inAppReviewNotNow` and open nothing.
+      TestWidgetsFlutterBinding.ensureInitialized();
+      const channel = MethodChannel('flutter_store_listing');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async => 'noPresenter');
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+
+      final launcher = _FakeLauncher();
+      final outcome = await _subject(
+        platform: StorePlatform.macOS,
+        macAppStoreId: '1478552452',
+        launcher: launcher,
+      ).requestReview();
+
+      expect(outcome, StoreListingOutcome.storeListingOpened);
+      expect(
+        launcher.opened.single,
+        Uri.parse(
+          'https://apps.apple.com/app/id1478552452?action=write-review',
+        ),
+      );
+    });
   });
 
   group('storeListingUri', () {
@@ -1051,29 +1116,18 @@ void main() {
       );
     });
 
-    test('maps macOS\'s missing presenter to notNow as well', () async {
-      // macOS answers `noPresenter` rather than `noActiveScene`: it has no
-      // scenes, and `AppStore.requestReview(in:)` takes an `NSViewController`
-      // there. Same meaning, so the same outcome and the same suppressed
-      // fallback.
+    test('maps macOS\'s missing presenter to unavailable, not notNow', () async {
+      // The opposite of the test above, deliberately. macOS answers
+      // `noPresenter` when there is no visible window to present into, and
+      // that is *not* the transient state `noActiveScene` describes: a Mac app
+      // with no window need never grow one. The fallback opens the Mac App
+      // Store, a separate process that needs no window in this app, so it can
+      // still do something — which `notNow` would have prevented, leaving such
+      // a host worse off on 2.1 than it was on 2.0.
       mockNative((call) async => 'noPresenter');
       expect(
         await const StoreKitInAppReview(StorePlatform.macOS).requestReview(),
-        InAppReviewRequest.notNow,
-      );
-    });
-
-    test('still reads the iOS spelling after a host is not rebuilt', () async {
-      // The reason 2.1 added a value instead of renaming one. Dart always
-      // ships new; the compiled plugin in the host app does not, so an older
-      // native side goes on answering `noActiveScene` to this code. If that
-      // stopped mapping to `notNow`, the transient condition would read as an
-      // unreadable reply and run the fallback — sending the user to the store
-      // during a launch transition, which is the exact bug 2.0 fixed.
-      mockNative((call) async => 'noActiveScene');
-      expect(
-        await const StoreKitInAppReview(StorePlatform.macOS).requestReview(),
-        InAppReviewRequest.notNow,
+        InAppReviewRequest.unavailable,
       );
     });
 

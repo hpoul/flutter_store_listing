@@ -91,19 +91,19 @@ enum InAppReviewRequest {
   /// Nothing was shown, and nothing can be until something outside this
   /// package's view changes — on iOS, no window scene was foreground-active,
   /// which is true during the launch transition, while a system alert is up,
-  /// and for a visible but unfocused iPad window. On macOS, the plugin's
-  /// registrar reported no view controller, which means the app has no window
-  /// to present into.
+  /// and for a visible but unfocused iPad window.
   ///
   /// The caller's [ReviewFallback] **does not run** for this. The user did not
   /// ask to leave the app, and sending them to the store because the app was
   /// still waking up is worse than doing nothing. Ask again later.
   ///
-  /// The macOS case is rarer, and need not be transient: a host running
-  /// genuinely headless never grows a window, so it reports this every time.
-  /// Suppressing the fallback is still the right answer there. Treating a
-  /// windowless app as "no prompt on this platform" would substitute a store
-  /// page in the one situation where there is also nowhere to show it.
+  /// **macOS does not report this**, although it has a condition that looks
+  /// like it: no visible window to present into. That one is not transient —
+  /// a Mac app with no window need never grow one — and the macOS fallback
+  /// opens the Mac App Store, a separate process that needs no window in the
+  /// calling app. So it answers [unavailable] instead, and the fallback runs.
+  /// "Transient" is the whole content of this value; a condition that merely
+  /// resembles it does not belong here.
   notNow,
 
   /// This prompt cannot show anything: the platform has none, or the

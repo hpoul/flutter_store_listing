@@ -174,8 +174,8 @@ class PackageInfoStoreIdentity implements StoreIdentity {
   }
 }
 
-/// The iOS StoreKit review prompt, behind the same interface an Android
-/// implementation would use.
+/// The StoreKit review prompt — iOS, and macOS as of 2.1 — behind the same
+/// interface an Android implementation would use.
 class StoreKitInAppReview implements InAppReviewPrompt {
   const StoreKitInAppReview(this.platform);
 
@@ -193,7 +193,6 @@ class StoreKitInAppReview implements InAppReviewPrompt {
   /// `AppStore.requestReview(in:)` takes a `UIWindowScene` on iOS and an
   /// `NSViewController` on macOS. False→true is a widening, so no caller that
   /// gated UI on this breaks.
-  ///
   @override
   Future<bool> isAvailable() async => supportsPlatform(platform);
 
@@ -204,8 +203,8 @@ class StoreKitInAppReview implements InAppReviewPrompt {
   /// `platform == StorePlatform.iOS`. Two places encoded one fact, and 2.1
   /// found out the hard way: widening [isAvailable] to macOS left the getter
   /// still saying iOS, and the whole suite stayed green, because no test
-  /// compared them. One source of truth, and a test below that holds the two
-  /// together.
+  /// compared them. One source of truth now, held there by a test that walks
+  /// `StorePlatform.values` asserting the getter and this agree.
   ///
   /// A `switch` rather than two comparisons, because [StorePlatform] is closed
   /// and this is the pattern the package recommends to its own callers: if a
@@ -228,25 +227,34 @@ class StoreKitInAppReview implements InAppReviewPrompt {
       switch (result) {
         case 'requested':
           return InAppReviewRequest.requested;
-        // Two spellings, one meaning: there was nothing to present the prompt
-        // in. iOS says `noActiveScene` (no foreground-active window scene),
-        // macOS says `noPresenter` (no view controller, so no window).
-        //
-        // The iOS spelling is kept rather than unified under the neutral name,
-        // because this branch has to keep reading it either way: upgrading the
-        // package without rebuilding the host leaves an older compiled plugin
-        // answering this newer Dart code. Accepting a value only newer native
-        // code sends is safe in that direction; renaming one would make a
-        // transient condition look like an unreadable reply and run the
-        // fallback.
+        // iOS: no foreground-active window scene. Transient — a launch
+        // transition, a system alert, an unfocused iPad window — so the
+        // fallback is suppressed and the caller is told to ask again.
         case 'noActiveScene':
-        case 'noPresenter':
           _logger.info(
-            'Nothing to present a review prompt in ($result), so StoreKit was '
-            'not asked. Nothing was shown and no fallback ran; ask again '
-            'later.',
+            'No foreground-active scene, so StoreKit was not asked. Nothing '
+            'was shown and no fallback ran; ask again later.',
           );
           return InAppReviewRequest.notNow;
+
+        // macOS: no visible window to present into. Not the same thing, which
+        // is why it is not the same outcome.
+        //
+        // The first draft of 2.1 mapped this to `notNow` by analogy with iOS,
+        // reasoning that a store page is no more showable than a dialog when
+        // there is nowhere to show it. That reasoning is wrong, and this
+        // package's own README says why: on macOS the listing opens in the Mac
+        // App Store *app*, a separate process that needs no window here. So
+        // the fallback does work, and suppressing it would have made 2.1 a
+        // regression for a windowless host — 2.0 opened the write-review sheet
+        // for those, and 2.1 would have done nothing at all, forever, since a
+        // Mac app with no window need never grow one.
+        case 'noPresenter':
+          _logger.info(
+            'No visible window to present a review prompt in, so StoreKit was '
+            'not asked. Falling back.',
+          );
+          return InAppReviewRequest.unavailable;
       }
       _logger.severe('Unexpected requestReview result: $result');
       return InAppReviewRequest.unavailable;

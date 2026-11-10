@@ -21,17 +21,15 @@ public class FlutterStoreListingPlugin: NSObject, FlutterPlugin {
     /// The registrar, kept so that `viewController` can be read when a review
     /// is actually requested.
     ///
-    /// The view controller itself is deliberately **not** stored: the registrar
-    /// documents that a plugin should not hold a strong reference to it, and it
-    /// can legitimately change or go away while the app runs — on macOS a
-    /// window can be closed without the app quitting.
+    /// The view controller itself is deliberately **not** stored: the
+    /// registrar's own header says a plugin should not hold a strong reference
+    /// to it, and it can be attached after registration or replaced while the
+    /// app runs.
     ///
-    /// Holding the registrar strongly does form a retain cycle through the
-    /// engine, which holds the method call handler that holds this instance.
-    /// That is accepted rather than worked around with a `weak` reference: the
-    /// cycle costs one object for the lifetime of a process that keeps the
-    /// engine alive anyway, whereas a registrar that turned out not to be
-    /// retained elsewhere would make the prompt silently stop working.
+    /// Holding the registrar strongly is safe and costs nothing. The engine
+    /// retains every registrar it creates, and `FlutterEngineRegistrar` holds
+    /// its engine *weakly*, so the chain engine → channel handler → plugin →
+    /// registrar is not a cycle.
     private let registrar: FlutterPluginRegistrar
 
     private init(registrar: FlutterPluginRegistrar) {
@@ -73,41 +71,51 @@ public class FlutterStoreListingPlugin: NSObject, FlutterPlugin {
 
   /// Asks StoreKit to show the review prompt.
   ///
-  /// Answers with a status string rather than a bool, because the two ways
-  /// this can fail want opposite handling on the Dart side and a bool could
-  /// only carry one of them:
+  /// Answers with a status string rather than a bool, because the ways this
+  /// can fail want different handling on the Dart side and a bool could only
+  /// carry one of them:
   ///
   /// * `requested` — handed to StoreKit. Not a promise that a prompt appeared:
   ///   StoreKit decides that, and rate-limits it per user and per app version
   ///   without telling the caller either way.
-  /// * `noActiveScene` (iOS) / `noPresenter` (macOS) — there was nothing to
-  ///   present in, so nothing was asked for. Dart reports `inAppReviewNotNow`
-  ///   for either and deliberately runs **no** fallback: the state is
-  ///   transient, and sending the user to the App Store because the app was
-  ///   mid-launch is worse than doing nothing.
+  /// * `noActiveScene` (iOS) — no window scene was foreground-active, so
+  ///   nothing was asked for. Dart reports `inAppReviewNotNow` and runs **no**
+  ///   fallback: the state is transient — a launch transition, a system alert,
+  ///   an unfocused iPad window — and sending the user to the App Store
+  ///   because the app was still waking up is worse than doing nothing.
+  /// * `noPresenter` (macOS) — there is no visible window to present into.
+  ///   Dart reports `inAppReviewUnavailable` and the fallback **does** run.
   ///
-  /// The two spellings are kept apart rather than unified under one neutral
-  /// name because the Dart half has to keep reading `noActiveScene` regardless:
-  /// upgrading this package without rebuilding the host leaves an older
-  /// compiled plugin answering a newer Dart side. Adding a value only the new
-  /// native code sends is safe in that direction; renaming one is not.
+  /// The two failures are spelled differently because they mean different
+  /// things, which is easy to miss: both describe "nowhere to present", but
+  /// only the iOS one is transient. A Mac app with no visible window may never
+  /// grow one, and the macOS fallback opens the Mac App Store — a separate
+  /// process that needs no window in this app — so suppressing it would leave
+  /// such a host with no way to ask for a review at all.
   ///
-  /// A missing plugin registration is the case that *should* fall back, and it
-  /// never reaches this method — Dart sees `MissingPluginException` instead.
+  /// A missing plugin registration is a third case that should fall back, and
+  /// it never reaches this method — Dart sees `MissingPluginException`.
   private func requestReview(result: @escaping FlutterResult) {
     Task { @MainActor in
       #if os(macOS)
+        guard let controller = Self.visiblePresenter(for: registrar) else {
+          result("noPresenter")
+          return
+        }
         if #available(macOS 13.0, *) {
-          // Read now rather than at registration: see `registrar` above.
-          guard let controller = registrar.viewController else {
-            result("noPresenter")
-            return
-          }
           AppStore.requestReview(in: controller)
         } else {
-          // No presenter is needed below macOS 13, so no guard either — the
-          // deprecated API finds the key window itself.
-          Self.legacyRequestReview()
+          // The pre-scene API, available since macOS 10.14 and deprecated at
+          // 15. It takes no presenter and finds the key window itself, but it
+          // is reached through the same guard as the modern call so that the
+          // two macOS paths answer the same question about the same state.
+          //
+          // No `@available` dance is needed to keep the deprecation warning
+          // quiet: the `else` branch of an `#available` check narrows the
+          // availability context to below macOS 13, where this symbol is not
+          // yet deprecated, so the call is silent even when a consuming app
+          // raises its deployment target past 15.
+          SKStoreReviewController.requestReview()
         }
       #else
         guard let scene = Self.activeWindowScene() else {
@@ -117,7 +125,9 @@ public class FlutterStoreListingPlugin: NSObject, FlutterPlugin {
         if #available(iOS 16.0, *) {
           AppStore.requestReview(in: scene)
         } else {
-          Self.legacyRequestReview(in: scene)
+          // Silent for the same reason as the macOS call above: inside this
+          // branch the context is below iOS 16, and this is deprecated at 18.
+          SKStoreReviewController.requestReview(in: scene)
         }
       #endif
       result("requested")
@@ -125,45 +135,34 @@ public class FlutterStoreListingPlugin: NSObject, FlutterPlugin {
   }
 
   #if os(macOS)
-    /// `SKStoreReviewController.requestReview()` is deprecated as of macOS 15
-    /// in favour of `AppStore.requestReview(in:)`, which needs macOS 13. This
-    /// is the fallback for macOS 12, the oldest version Flutter itself
-    /// supports.
+    /// The view controller to present into, or nil when there is no visible
+    /// window.
     ///
-    /// Note that the macOS spelling takes no argument at all — it is the
-    /// pre-scene `+requestReview`, available since macOS 10.14, and there has
-    /// never been a `requestReviewInScene:` on this platform. So the upgrade to
-    /// `AppStore.requestReview(in:)` is where macOS *gains* a presenter
-    /// parameter, rather than exchanging one for another as iOS did.
+    /// Both halves of that matter. `viewController` is nil only when the
+    /// Flutter view controller was never attached or has been deallocated — a
+    /// headless engine — and it stays non-nil for a window that is closed,
+    /// hidden or minimised. Presenting into one of those and reporting success
+    /// is the iOS bug `activeWindowScene()` below exists to avoid, so macOS
+    /// checks the window too rather than trusting the controller's existence.
     ///
-    /// Marking the helper deprecated is what keeps the deprecation warning from
-    /// propagating to the caller: an availability check alone does not silence
-    /// it, because the symbol is deprecated at every version it is available
-    /// at.
-    @available(macOS, introduced: 12.0, deprecated: 13.0)
+    /// `isViewLoaded` is checked before `view` so that reading the window
+    /// cannot force `loadView` on a controller that has not loaded one.
+    /// AppKit's `viewIfLoaded` says that in one expression, but it is macOS
+    /// 14+ — unlike the UIKit property of the same name, which is iOS 9+ —
+    /// and this has to work at the macOS 12 floor.
     @MainActor
-    private static func legacyRequestReview() {
-      SKStoreReviewController.requestReview()
+    private static func visiblePresenter(
+      for registrar: FlutterPluginRegistrar
+    ) -> NSViewController? {
+      guard let controller = registrar.viewController,
+        controller.isViewLoaded,
+        controller.view.window?.isVisible == true
+      else {
+        return nil
+      }
+      return controller
     }
   #else
-    /// `SKStoreReviewController` is deprecated as of iOS 18 in favour of
-    /// `AppStore.requestReview(in:)`, which needs iOS 16. This is the fallback
-    /// for iOS 15, the oldest version Flutter itself supports.
-    ///
-    /// `introduced:` must not claim anything below 14.0 — `requestReview(in:)`
-    /// is itself iOS 14.0+ (`API_DEPRECATED(..., ios(14.0, 18.0))`), so a lower
-    /// bound here is a compile error rather than a wider floor.
-    ///
-    /// Marking the helper deprecated is what keeps the deprecation warning from
-    /// propagating to the caller: an availability check alone does not silence
-    /// it, because the symbol is deprecated at every version it is available
-    /// at.
-    @available(iOS, introduced: 15.0, deprecated: 16.0)
-    @MainActor
-    private static func legacyRequestReview(in scene: UIWindowScene) {
-      SKStoreReviewController.requestReview(in: scene)
-    }
-
     /// The foreground-active window scene, or nil.
     ///
     /// Deliberately *only* the foreground-active one. This used to fall back to
@@ -172,10 +171,6 @@ public class FlutterStoreListingPlugin: NSObject, FlutterPlugin {
     /// background scene and success reported for it. Returning nil instead makes
     /// the caller report `noActiveScene`, which Dart answers by doing nothing and
     /// saying so, rather than by substituting the store listing.
-    ///
-    /// macOS has no equivalent check. `NSViewController` carries no activation
-    /// state, and the registrar's own view controller is the one hosting the
-    /// Flutter content, so there is no set to pick the right member out of.
     @MainActor
     private static func activeWindowScene() -> UIWindowScene? {
       let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }

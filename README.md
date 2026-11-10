@@ -46,8 +46,10 @@ costs you nothing here.
 **2.1 declares the macOS platform**, because the prompt is native and there is
 finally something to register. `pubspec.yaml` lists `ios` and `macos` with
 `sharedDarwinSource: true`, so both resolve one Swift source tree, one podspec
-and one `Package.swift` under `darwin/` — the platforms differ in a single
-`#if os(macOS)`, over which kind of window the prompt is presented in. With
+and one `Package.swift` under `darwin/`. The platforms differ only in which
+kind of window the prompt is presented into, across five `#if os(macOS)`
+blocks in that one file — imports, the stored registrar, registration, the
+request itself and the presenter lookup. With
 CocoaPods the pod depends on `Flutter` for iOS and `FlutterMacOS` for macOS;
 Swift Package Manager resolves `darwin/flutter_store_listing/Package.swift` for
 both. Nothing to do on your side either way.
@@ -117,11 +119,12 @@ app, so sending them to the App Store because it was still waking up would be
 worse than doing nothing. If you ask for a review from a post-frame callback at
 startup, expect this outcome sometimes and ask again later.
 
-macOS reports the same outcome for its own version of nothing-to-present-in:
-the plugin has no view controller, which means the app has no window. That is
-rarer than the iOS case and need not be transient — a windowless app never
-grows one — but suppressing the fallback is still right, since a store page is
-no more showable than a dialog when there is nowhere to show it.
+**macOS does not report that outcome**, although it has a condition that looks
+like one: no visible window to present into. Two things make it different. The
+iOS state passes on its own and the macOS one need not — a Mac app with no
+window may never grow one — and the macOS fallback opens the Mac App Store, a
+separate process that needs no window in your app. So a windowless Mac gets
+`inAppReviewUnavailable` and the fallback runs, rather than nothing at all.
 
 # Usage
 

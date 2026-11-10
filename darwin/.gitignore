@@ -34,3 +34,9 @@ Icon?
 .tags*
 
 /Flutter/Generated.xcconfig
+
+# Opening darwin/flutter_store_listing/Package.swift directly in Xcode, or
+# running `swift build` there, creates these. Without them pub would ship
+# build output inside the published package.
+.build/
+.swiftpm/
