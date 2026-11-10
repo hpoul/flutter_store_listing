@@ -9,8 +9,9 @@ lookup is gone.** The design and its reasoning are in
 
 * **macOS, Windows, Linux and web used to take the Android branch.** A macOS
   build opened a Google Play web page for a macOS bundle id and returned
-  `true`. macOS now opens its own App Store listing; the rest report
-  `unsupportedPlatform`.
+  `true`. macOS now opens its own App Store listing — in the Mac App Store
+  app, verified on macOS 27.0.1, with `?action=write-review` bringing up the
+  store's *Write a Review* sheet; the rest report `unsupportedPlatform`.
 * **A bare `bool` could not tell "no app store here" from "could not resolve
   the id" from "the launcher refused"** — or, when the id resolved to the
   string `"null"`, from success. `StoreListingOutcome` distinguishes all of
@@ -119,7 +120,8 @@ await FlutterStoreListing.instance.openStoreListing(writeReview: true);
   `apps.apple.com` URL and hands it to `url_launcher`, so there is no native
   implementation here to register; declaring the platform means shipping a
   `macos/` directory, which lands with the native macOS prompt. The listing
-  works on macOS with no extra step on your side.
+  works on macOS with no extra step on your side. The example app now has a
+  macOS target, so this is reproducible rather than asserted.
 * `configure()` **merges**: an argument left out keeps its current value, so an
   app's own call and a review package's compose rather than overwriting.
 * The shared instance reads its configuration **per call**, so a reference

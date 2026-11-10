@@ -21,6 +21,17 @@ and opened a Google Play web page for a macOS bundle id. Its in-app prompt
 needs a view controller rather than a window scene and is deferred; when it
 arrives, `isInAppReviewSupported` going false→true on macOS breaks nobody.
 
+**On macOS the listing opens in the Mac App Store app, not a browser** —
+verified on macOS 27.0.1 with Flutter 3.47.9, `?action=write-review` included,
+which brings up the store's own *Write a Review* sheet. macOS routes
+`apps.apple.com` to the store app as a universal link.
+
+Worth knowing if you ever check this yourself: **`canLaunchUrl` will tell you
+the opposite.** It reports the default handler for the `https` scheme — your
+browser — because universal-link routing happens inside the open call, not in
+the lookup. This package never calls `canLaunchUrl`, which is why that gap
+costs you nothing here.
+
 **The macOS listing is Dart-only, and `pubspec.yaml` declares no macOS
 platform**, so pub.dev badges this package Android and iOS. That is not an
 oversight: the macOS path builds an `apps.apple.com` URL and hands it to
