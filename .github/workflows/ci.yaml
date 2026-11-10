@@ -32,6 +32,17 @@ jobs:
       - name: Verify the tree is clean after pub get
         run: git diff --exit-code
 
+      # The podspec carries its own version and nothing resolves it from
+      # pubspec.yaml, which is how it sat at 1.3.0 through the whole of 2.0.
+      # It is not harmless: a CocoaPods consumer sees that number in their
+      # Podfile.lock, so a stale one misreports which version they are on.
+      - name: Verify the podspec version matches pubspec.yaml
+        run: |
+          pubspec=$(sed -nE 's/^version: (.*)$/\1/p' pubspec.yaml)
+          podspec=$(sed -nE "s/^ *s\.version *= *'(.*)'.*$/\1/p" darwin/flutter_store_listing.podspec)
+          echo "pubspec.yaml: '$pubspec'  podspec: '$podspec'"
+          test -n "$pubspec" && test "$pubspec" = "$podspec"
+
       - name: Analyze
         run: flutter analyze --fatal-infos
 
@@ -99,3 +110,26 @@ jobs:
         run: |
           flutter pub get
           flutter build ios --no-codesign --debug
+
+  # Separate from the iOS job even though 2.1 moved both platforms into one
+  # `darwin/` source tree — because of that, in fact. The macOS half of the
+  # review prompt lives behind `#if os(macOS)`, which an iOS build never
+  # compiles, so an iOS-only CI would have gone on passing while the macOS
+  # branch failed to build at all.
+  build-example-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # No --no-codesign equivalent is needed: the macOS template signs to run
+      # locally, which needs no key.
+      - name: Build example (macOS)
+        working-directory: example
+        run: |
+          flutter pub get
+          flutter build macos --debug

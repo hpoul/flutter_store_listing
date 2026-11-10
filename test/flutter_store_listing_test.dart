@@ -228,12 +228,37 @@ void main() {
       );
     });
 
-    test('in-app review is iOS-only by default', () {
+    test('in-app review is Apple-only by default', () {
       expect(
         _subject(platform: StorePlatform.iOS).isInAppReviewSupported,
         isTrue,
       );
+      // New in 2.1, and the assertion that was missing: this getter kept its
+      // own `platform == StorePlatform.iOS`, so teaching the prompt about
+      // macOS left the capability getter answering false with a green suite.
+      expect(
+        _subject(platform: StorePlatform.macOS).isInAppReviewSupported,
+        isTrue,
+      );
       expect(_subject().isInAppReviewSupported, isFalse);
+      expect(
+        _subject(platform: StorePlatform.unsupported).isInAppReviewSupported,
+        isFalse,
+      );
+    });
+
+    test('the getter and the built-in prompt cannot drift apart', () async {
+      // The structural half of that fix. The getter is synchronous and
+      // `InAppReviewPrompt.isAvailable` is not, so the two cannot be one
+      // member; this holds them to the same answer on every platform,
+      // including a value added after this was written.
+      for (final platform in StorePlatform.values) {
+        expect(
+          _subject(platform: platform).isInAppReviewSupported,
+          await StoreKitInAppReview(platform).isAvailable(),
+          reason: 'the getter and the prompt disagree about $platform',
+        );
+      }
     });
 
     test('a configured prompt makes Android support in-app review', () {
@@ -673,6 +698,71 @@ void main() {
       expect(calls, ['requestReview']);
       expect(outcome, StoreListingOutcome.inAppReviewRequested);
     });
+
+    test('macOS reaches StoreKit through the real resolution', () async {
+      // The macOS counterpart of the test above. Until 2.1 the built-in prompt
+      // reported itself unavailable here and the channel was never called.
+      TestWidgetsFlutterBinding.ensureInitialized();
+      const channel = MethodChannel('flutter_store_listing');
+      final calls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            return 'requested';
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+
+      final launcher = _FakeLauncher();
+      final outcome = await _subject(
+        platform: StorePlatform.macOS,
+        macAppStoreId: '1478552452',
+        launcher: launcher,
+      ).requestReview();
+
+      expect(calls, ['requestReview']);
+      expect(outcome, StoreListingOutcome.inAppReviewRequested);
+      // The prompt and the listing are mutually exclusive, which 1.2.0 got
+      // wrong on iOS by doing both.
+      expect(launcher.opened, isEmpty);
+    });
+
+    test('a windowless Mac still gets the write-review page', () async {
+      // The whole macOS "no presenter" path, end to end, through the real
+      // StoreKit prompt rather than a composite built by hand.
+      //
+      // Both halves of this were asserted separately — that `noPresenter`
+      // maps to `unavailable`, and that `unavailable` runs the fallback — and
+      // never together. That is the exact shape of the bug this release found,
+      // so the path that the first draft of 2.1 got wrong is now covered as
+      // one piece: had `noPresenter` stayed mapped to `notNow`, this would
+      // report `inAppReviewNotNow` and open nothing.
+      TestWidgetsFlutterBinding.ensureInitialized();
+      const channel = MethodChannel('flutter_store_listing');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async => 'noPresenter');
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+
+      final launcher = _FakeLauncher();
+      final outcome = await _subject(
+        platform: StorePlatform.macOS,
+        macAppStoreId: '1478552452',
+        launcher: launcher,
+      ).requestReview();
+
+      expect(outcome, StoreListingOutcome.storeListingOpened);
+      expect(
+        launcher.opened.single,
+        Uri.parse(
+          'https://apps.apple.com/app/id1478552452?action=write-review',
+        ),
+      );
+    });
   });
 
   group('storeListingUri', () {
@@ -979,20 +1069,30 @@ void main() {
 
     tearDown(() => mockNative(null));
 
-    test('is available on iOS and nowhere else', () async {
-      // The iOS prompt is behind the same interface the Play package would
+    test('is available on both Apple platforms and nowhere else', () async {
+      // The prompt is behind the same interface the Play package would
       // implement, which is what makes it reachable from a test at all — up
       // to 1.4.0 it was a static const MethodChannel with no seam.
       expect(
         await const StoreKitInAppReview(StorePlatform.iOS).isAvailable(),
         isTrue,
       );
+      // False until 2.1, which added the native macOS implementation. The
+      // widening is deliberately not hidden behind a flag: a caller gating UI
+      // on `isInAppReviewSupported` gains a working prompt, and one that was
+      // relying on the fallback gets the native dialog instead of a web page.
       expect(
         await const StoreKitInAppReview(StorePlatform.macOS).isAvailable(),
-        isFalse,
+        isTrue,
       );
       expect(
         await const StoreKitInAppReview(StorePlatform.android).isAvailable(),
+        isFalse,
+      );
+      expect(
+        await const StoreKitInAppReview(
+          StorePlatform.unsupported,
+        ).isAvailable(),
         isFalse,
       );
     });
@@ -1013,6 +1113,21 @@ void main() {
       expect(
         await const StoreKitInAppReview(StorePlatform.iOS).requestReview(),
         InAppReviewRequest.notNow,
+      );
+    });
+
+    test('maps macOS\'s missing presenter to unavailable, not notNow', () async {
+      // The opposite of the test above, deliberately. macOS answers
+      // `noPresenter` when there is no visible window to present into, and
+      // that is *not* the transient state `noActiveScene` describes: a Mac app
+      // with no window need never grow one. The fallback opens the Mac App
+      // Store, a separate process that needs no window in this app, so it can
+      // still do something — which `notNow` would have prevented, leaving such
+      // a host worse off on 2.1 than it was on 2.0.
+      mockNative((call) async => 'noPresenter');
+      expect(
+        await const StoreKitInAppReview(StorePlatform.macOS).requestReview(),
+        InAppReviewRequest.unavailable,
       );
     });
 

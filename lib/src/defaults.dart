@@ -174,21 +174,45 @@ class PackageInfoStoreIdentity implements StoreIdentity {
   }
 }
 
-/// The iOS StoreKit review prompt, behind the same interface an Android
-/// implementation would use.
+/// The StoreKit review prompt — iOS, and macOS as of 2.1 — behind the same
+/// interface an Android implementation would use.
 class StoreKitInAppReview implements InAppReviewPrompt {
   const StoreKitInAppReview(this.platform);
 
   final StorePlatform platform;
 
-  /// True on iOS alone.
+  /// True on iOS and macOS.
   ///
   /// There is no channel round trip to learn this: the native side answers
-  /// unconditionally on every iOS version this package supports, so asking it
-  /// only cost an `await`. macOS has no prompt here yet — the native side
-  /// needs a view controller rather than a window scene, which is 2.1 work.
+  /// unconditionally on every version of either platform this package
+  /// supports, so asking it only cost an `await`.
+  ///
+  /// macOS answers true as of 2.1, and 2.0 had already named the reason it
+  /// could not: the native side needs a view controller rather than a window
+  /// scene. The SDK turns out to say exactly that —
+  /// `AppStore.requestReview(in:)` takes a `UIWindowScene` on iOS and an
+  /// `NSViewController` on macOS. False→true is a widening, so no caller that
+  /// gated UI on this breaks.
   @override
-  Future<bool> isAvailable() async => platform == StorePlatform.iOS;
+  Future<bool> isAvailable() async => supportsPlatform(platform);
+
+  /// Whether this package ships a StoreKit prompt for [platform].
+  ///
+  /// Static and synchronous because [FlutterStoreListing.isInAppReviewSupported]
+  /// is a synchronous getter and used to answer this with its own
+  /// `platform == StorePlatform.iOS`. Two places encoded one fact, and 2.1
+  /// found out the hard way: widening [isAvailable] to macOS left the getter
+  /// still saying iOS, and the whole suite stayed green, because no test
+  /// compared them. One source of truth now, held there by a test that walks
+  /// `StorePlatform.values` asserting the getter and this agree.
+  ///
+  /// A `switch` rather than two comparisons, because [StorePlatform] is closed
+  /// and this is the pattern the package recommends to its own callers: if a
+  /// value is ever added, this is a compile error instead of a silent `false`.
+  static bool supportsPlatform(StorePlatform platform) => switch (platform) {
+    StorePlatform.iOS || StorePlatform.macOS => true,
+    StorePlatform.android || StorePlatform.unsupported => false,
+  };
 
   /// The native side answers with a status string rather than a bool, so that
   /// "StoreKit took it" and "there was no scene to present in" are two
@@ -203,12 +227,34 @@ class StoreKitInAppReview implements InAppReviewPrompt {
       switch (result) {
         case 'requested':
           return InAppReviewRequest.requested;
+        // iOS: no foreground-active window scene. Transient — a launch
+        // transition, a system alert, an unfocused iPad window — so the
+        // fallback is suppressed and the caller is told to ask again.
         case 'noActiveScene':
           _logger.info(
             'No foreground-active scene, so StoreKit was not asked. Nothing '
             'was shown and no fallback ran; ask again later.',
           );
           return InAppReviewRequest.notNow;
+
+        // macOS: no visible window to present into. Not the same thing, which
+        // is why it is not the same outcome.
+        //
+        // The first draft of 2.1 mapped this to `notNow` by analogy with iOS,
+        // reasoning that a store page is no more showable than a dialog when
+        // there is nowhere to show it. That reasoning is wrong, and this
+        // package's own README says why: on macOS the listing opens in the Mac
+        // App Store *app*, a separate process that needs no window here. So
+        // the fallback does work, and suppressing it would have made 2.1 a
+        // regression for a windowless host — 2.0 opened the write-review sheet
+        // for those, and 2.1 would have done nothing at all, forever, since a
+        // Mac app with no window need never grow one.
+        case 'noPresenter':
+          _logger.info(
+            'No visible window to present a review prompt in, so StoreKit was '
+            'not asked. Falling back.',
+          );
+          return InAppReviewRequest.unavailable;
       }
       _logger.severe('Unexpected requestReview result: $result');
       return InAppReviewRequest.unavailable;

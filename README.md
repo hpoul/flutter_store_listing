@@ -1,9 +1,9 @@
 # flutter_store_listing
 
-Flutter plugin to open store listings for the iOS App Store and the Google Play
-store, and on iOS to ask for a review in-app using StoreKit's review API
-(`AppStore.requestReview(in:)` on iOS 16+, falling back to
-`SKStoreReviewController` on iOS 15).
+Flutter plugin to open store listings for the iOS App Store, the Mac App Store
+and the Google Play store, and on iOS and macOS to ask for a review in-app
+using StoreKit's review API — `AppStore.requestReview(in:)` on iOS 16+ and
+macOS 13+, falling back to `SKStoreReviewController` on iOS 15 and macOS 12.
 
 Supports both Swift Package Manager and CocoaPods.
 
@@ -13,13 +13,24 @@ Supports both Swift Package Manager and CocoaPods.
 | --- | --- | --- |
 | iOS | ✅ `apps.apple.com` | ✅ StoreKit |
 | Android | ✅ Play Store app, else browser | ❌ see below |
-| macOS | ✅ `apps.apple.com` | ❌ not yet |
+| macOS | ✅ `apps.apple.com` | ✅ StoreKit |
 | web, Windows, Linux | ❌ `unsupportedPlatform` | ❌ `unsupportedPlatform` |
 
-macOS gained the listing in 2.0. Up to 1.4.0 it fell into the Android branch
-and opened a Google Play web page for a macOS bundle id. Its in-app prompt
-needs a view controller rather than a window scene and is deferred; when it
-arrives, `isInAppReviewSupported` going false→true on macOS breaks nobody.
+macOS gained the listing in 2.0 and the review prompt in 2.1. Up to 1.4.0 it
+fell into the Android branch and opened a Google Play web page for a macOS
+bundle id.
+
+2.0 deferred the prompt on the grounds that it needs a view controller rather
+than a window scene, and that turned out to be exactly right:
+`AppStore.requestReview(in:)` takes a `UIWindowScene` on iOS and an
+`NSViewController` on macOS. It needs macOS 13, and falls back to the
+deprecated `SKStoreReviewController.requestReview()` on macOS 12, so this
+package's floor is still Flutter's own rather than one raised for a prompt.
+
+`isInAppReviewSupported` answering true on macOS where it answered false is a
+widening, which is why the prompt arrives in a minor release: UI that gated on
+it gains a working prompt, and a caller that was relying on the fallback gets
+the native dialog instead of a web page.
 
 **On macOS the listing opens in the Mac App Store app, not a browser** —
 verified on macOS 27.0.1 with Flutter 3.47.9, `?action=write-review` included,
@@ -32,14 +43,20 @@ browser — because universal-link routing happens inside the open call, not in
 the lookup. This package never calls `canLaunchUrl`, which is why that gap
 costs you nothing here.
 
-**The macOS listing is Dart-only, and `pubspec.yaml` declares no macOS
-platform**, so pub.dev badges this package Android and iOS. That is not an
-oversight: the macOS path builds an `apps.apple.com` URL and hands it to
-`url_launcher`, which declares macOS itself, so there is no native
-implementation here to register. Declaring the platform means shipping a
-`macos/` directory, and that lands with the native in-app prompt above rather
-than before it. Nothing to do on your side — add the dependency and the macOS
-listing works.
+**2.1 declares the macOS platform**, because the prompt is native and there is
+finally something to register. `pubspec.yaml` lists `ios` and `macos` with
+`sharedDarwinSource: true`, so both resolve one Swift source tree, one podspec
+and one `Package.swift` under `darwin/`. The platforms differ only in which
+kind of window the prompt is presented into, across five `#if os(macOS)`
+blocks in that one file — imports, the stored registrar, registration, the
+request itself and the presenter lookup. With
+CocoaPods the pod depends on `Flutter` for iOS and `FlutterMacOS` for macOS;
+Swift Package Manager resolves `darwin/flutter_store_listing/Package.swift` for
+both. Nothing to do on your side either way.
+
+Up to 2.0 the macOS listing was Dart-only — an `apps.apple.com` URL handed to
+`url_launcher`, which declares macOS itself — so pub.dev badged this package
+Android and iOS. That badge was defensible then and is simply correct now.
 
 Web and desktop report `unsupportedPlatform` rather than silently doing
 something wrong, which is the other half of the same fix.
@@ -87,10 +104,11 @@ So `requestReview(fallback: ReviewFallback.none)` reports
 `InAppReviewPrompt`. With a fallback — the default — it opens the Play listing
 instead.
 
-StoreKit decides whether the iOS prompt is actually shown — it is rate-limited
-per user and per app version, and it never reports back either way. A
+StoreKit decides whether the prompt is actually shown — it is rate-limited per
+user and per app version, and it never reports back either way. A
 `StoreListingOutcome.inAppReviewRequested` means the request reached the OS,
-not that anything appeared on screen.
+not that anything appeared on screen. That applies on macOS exactly as on iOS,
+and it is why this package cannot tell you whether your user saw a dialog.
 
 **The fallback runs when there is no prompt, not when there is one that cannot
 be shown yet.** iOS needs a foreground-active window scene to present into,
@@ -100,6 +118,13 @@ for a visible but unfocused iPad window. That reports
 app, so sending them to the App Store because it was still waking up would be
 worse than doing nothing. If you ask for a review from a post-frame callback at
 startup, expect this outcome sometimes and ask again later.
+
+**macOS does not report that outcome**, although it has a condition that looks
+like one: no visible window to present into. Two things make it different. The
+iOS state passes on its own and the macOS one need not — a Mac app with no
+window may never grow one — and the macOS fallback opens the Mac App Store, a
+separate process that needs no window in your app. So a windowless Mac gets
+`inAppReviewUnavailable` and the fallback runs, rather than nothing at all.
 
 # Usage
 

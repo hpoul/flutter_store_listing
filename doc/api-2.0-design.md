@@ -647,6 +647,26 @@ Separable, and adding it later is non-breaking —
 `isInAppReviewSupported` going false→true on macOS in 2.1 breaks nobody.
 **Deferred.**
 
+**Done in 2.1, and the list above was right about the hard part.**
+`AppStore.requestReview(in:)` takes a `UIWindowScene` on iOS and an
+`NSViewController` on macOS — the macOS SDK's own `StoreKit.swiftinterface`
+states exactly that, so the reason given here for deferring was the real one.
+The macOS example built for the verification above is what it presents into.
+
+Two items were cheaper than estimated. The "second SPM target" is not a second
+target at all: `sharedDarwinSource: true` points both platform entries at one
+`darwin/` tree, so `ios/` was renamed and the two platforms now differ in a
+handful of `#if os(macOS)` blocks. And the macOS 12 floor is kept rather than
+raised —
+the modern API needs macOS 13, so below that the prompt falls back to the
+no-argument `SKStoreReviewController.requestReview()`, exactly as iOS 15 falls
+back to the scene-taking one.
+
+One cost this did not foresee, and it was not in the native code at all:
+`isInAppReviewSupported` kept its own copy of the platform list, so teaching
+the prompt about macOS left the capability getter still saying iOS, with the
+whole suite green. §12 records it.
+
 Note that macOS is not merely "iOS with a different URL host": AuthPass has
 separate iOS and Mac SKUs (`id1479297675` vs `id1478552452`), so supporting the
 listing at all requires `macAppStoreId` from §2.4 rather than reusing
@@ -1296,6 +1316,13 @@ directory, which belongs with the native macOS prompt in 2.1. The runtime
 behaviour is fine — the macOS path is `url_launcher` only — so this is a
 documentation fix, and README and CHANGELOG now say so.
 
+**Resolved in 2.1**, and the conclusion held: the platform was declared once
+there was native code to register, which is the prompt. The one correction is
+the shape — `sharedDarwinSource: true` means the `macos/` directory this
+paragraph anticipated is a shared `darwin/` one, and `ios/` moved into it
+rather than a second tree appearing beside it. pub.dev now badges macOS
+because the package really does implement it.
+
 ### Not taken
 
 * **That a transient `.foregroundInactive` scene should not run the fallback**
@@ -1367,3 +1394,153 @@ The seam is also the honest shape: the first implementation outside this
 package wraps Play's review flow, which distinguishes "the quota is exhausted
 right now" from "Play is not installed" — the same distinction, arrived at from
 the other platform.
+
+## 12. 2.1 — the macOS review prompt
+
+§3 deferred this with a list of what it would cost, and the list was accurate
+about the hard part: `AppStore.requestReview(in:)` takes a `UIWindowScene` on
+iOS and an `NSViewController` on macOS. That is not inferred — it is what the
+macOS SDK's `StoreKit.swiftinterface` declares, and it is the whole reason the
+prompt could not simply follow the listing in 2.0.
+
+### What shipped
+
+* **One Darwin source tree.** `sharedDarwinSource: true` on both Apple
+  platform entries, so `ios/` became `darwin/` and both resolve one podspec,
+  one `Package.swift` and one Swift file. The estimate said "a second SPM
+  target"; there is none. The platforms differ across five `#if os(macOS)`
+  blocks in that one file, which is where both halves of each difference are
+  readable at once.
+* **macOS 12 is still the floor.** `AppStore.requestReview(in:)` needs macOS
+  13, so below it the prompt falls back to the no-argument
+  `SKStoreReviewController.requestReview()` — deprecated at macOS 15, and the
+  pre-scene API that has no presenter parameter at all. Structurally identical
+  to the iOS 15 fallback.
+* **A `noPresenter` reply**, meaning no visible window to present into,
+  mapping to `inAppReviewUnavailable` so the fallback runs. It is *not* the
+  analogue of `noActiveScene`, though the first draft of this section called
+  it one — see the review round below.
+
+### The bug this turned up, which was not in the native code
+
+**`isInAppReviewSupported` kept its own copy of the platform list.** The
+capability getter is synchronous and `InAppReviewPrompt.isAvailable()` is not,
+so the two cannot be the same member — and the fact that this package has a
+StoreKit prompt on exactly iOS was written down in both. Widening the prompt
+to macOS left the getter returning `platform == StorePlatform.iOS`, so a macOS
+app would have reported no in-app review while the prompt behind it worked.
+
+Every test passed. 73 of them, including ones that assert the getter's value
+and ones that assert the prompt's availability — and not one that compared the
+two, because nothing had ever made them disagree.
+
+The fix is `StoreKitInAppReview.supportsPlatform`, which both now call, plus a
+test that walks `StorePlatform.values` and holds the getter and the prompt to
+the same answer. That second test is a tautology while the getter delegates,
+which is precisely what it is for: it fails the moment someone writes the
+comparison out again.
+
+**The general shape is worth naming**, because §11 has two of these already: a
+fact stated in two places stays consistent only until one of them is edited,
+and a suite that tests both places independently cannot see the drift. Tests
+of agreement are a different category from tests of value, and this package
+now has one.
+
+### Verified, and not
+
+Verified on macOS 27.0.1 with Flutter 3.47.9: the plugin compiles for
+`arm64-apple-macos12.0` from `darwin/` with no warnings, the generated
+registrant registers `FlutterStoreListingPlugin` on macOS, and the example
+app — whose "Request review (native only)" button is gated on
+`isInAppReviewSupported` — now renders that button on macOS where 2.0 hid it.
+
+Pressing that button with `ReviewFallback.none`, so that nothing could stand
+in for the native path, reported `inAppReviewRequested`.
+
+**And StoreKit drew the dialog** — *"Enjoying flutter_store_listing_example?
+Click a star to rate it on the App Store"*, five stars and a *Not Now*, over
+the app's own window. This paragraph predicted the opposite before anyone
+pressed the button: it said a locally built Mac app is not an App Store
+installation, so an absent prompt would prove nothing. The reasoning was
+sound and the premise was simply untested — a debug build signed to run
+locally gets the dialog.
+
+**Still not verified, and not verifiable: that any particular user sees it.**
+StoreKit rate-limits per user and per app version and never reports back, so
+`inAppReviewRequested` still means the request reached the OS and nothing
+more. What changed is that the macOS path has now been watched working end to
+end rather than inferred from a return value.
+
+### Review round — three reviewers, and one decision reversed
+
+Read on three axes: the Swift and the native reply contract, the Dart and the
+documented claims, and the packaging. The pattern from §10 and §11 held for a
+third time — the structure survived and the confident sentences around it did
+not.
+
+**`noPresenter` was mapped to the wrong outcome, and the argument for it was
+refuted by this package's own README.** The first draft reasoned by analogy
+with iOS: nothing to present in, so `inAppReviewNotNow`, so no fallback,
+because "a store page is no more showable than a dialog when there is nowhere
+to show it."
+
+That last clause is false here, and §3 of this document is what proves it. The
+macOS listing opens in the Mac App Store **app**, through `NSWorkspace` — a
+separate process, which needs no window in the calling app at all. The
+fallback works perfectly on a host that has no window.
+
+So the draft would have made 2.1 a **regression** for exactly the hosts it
+claimed to be helping. A status-item app, or any Mac app whose window has been
+closed while it keeps running, got the write-review sheet on 2.0. On the draft
+2.1 it would have got nothing, and gone on getting nothing, since such an app
+need never grow a window. The release was described as a pure widening; for
+those hosts it was not.
+
+It is `inAppReviewUnavailable` now. Worth naming the error precisely, because
+it is not a slip: the analogy to iOS was carried across without re-checking
+whether its premise held on the other platform, and the premise — that the
+fallback needs a window — was never true on macOS. §3 had already established
+that, in this same document.
+
+**The guard was also checking the wrong thing.** `registrar.viewController` is
+nil only for a headless engine; it stays non-nil for a window that is closed,
+hidden or minimised. So the draft would have presented into an invisible
+window and reported success — which is precisely the iOS bug that §11 caught
+and that `activeWindowScene()` exists to prevent, reintroduced on the other
+platform by an author who had just read the comment explaining it. The macOS
+guard now requires a visible window, and the macOS 12 path goes through the
+same guard, so the two macOS branches answer the same question.
+
+**Three comments argued for their code with false mechanisms.**
+
+* The retain-cycle note claimed holding the registrar forms a cycle through
+  the engine, accepted as a cost. `FlutterEngineRegistrar` holds its engine
+  *weakly*, so there was never a cycle.
+* Both legacy helpers claimed that an `@available(…, deprecated:)` marking is
+  what silences the deprecation warning, "because an availability check alone
+  does not". The opposite is true: the `else` branch of an `#available` check
+  narrows the availability context to below the checked version, where the
+  symbol is not yet deprecated. Verified at four deployment targets — the two
+  floors and two raised past the deprecation — and the helpers were doing
+  nothing in all four. They are gone and the calls are inlined.
+
+Each of those comments was confident, specific, and wrong, which is the
+failure mode this document keeps recording: the code was right and the
+explanation attached to it was invented.
+
+**"The platforms differ in a single `#if os(macOS)`"** appeared in five
+places. There are five such blocks. Nobody counted.
+
+**A test asserted nothing.** The "still reads the iOS spelling" case passed a
+`StorePlatform` the code under test never reads, so it duplicated the iOS test
+beside it; its stated scenario — an unrebuilt *macOS* host answering
+`noActiveScene` — is impossible, because 2.0 shipped no macOS native code at
+all. Deleted.
+
+**And the one that is this section's own lesson repeating.** That
+`noPresenter` maps to `unavailable` was asserted in one test, and that
+`unavailable` runs the fallback in another; nothing drove the facade on macOS
+through the real prompt to the channel. The same "asserted separately, never
+together" shape that hid the capability-getter bug, in the code written to fix
+it. There is now a test for the whole path, and it is the one that would have
+caught the mapping error.

@@ -1,7 +1,8 @@
 name: flutter_store_listing
-description: Flutter plugin to handle app reviews with the StoreKit review API,
-  generate app store links and open them for iOS or android.
-version: 2.0.0
+description: Flutter plugin to handle app reviews with the StoreKit review API
+  on iOS and macOS, and to generate and open store listings for the App Store,
+  the Mac App Store and Google Play.
+version: 2.1.0
 homepage: https://github.com/hpoul/flutter_store_listing
 repository: https://github.com/hpoul/flutter_store_listing
 issue_tracker: https://github.com/hpoul/flutter_store_listing/issues
@@ -47,6 +48,20 @@ flutter:
       android:
         package: design.codeux.flutter_store_listing
         pluginClass: FlutterStoreListingPlugin
+      # iOS and macOS share one Swift source tree, one podspec and one
+      # Package.swift, all under `darwin/`, which is what `sharedDarwinSource`
+      # selects. The two platforms differ in exactly one place — iOS presents
+      # the review prompt into a `UIWindowScene` and macOS into an
+      # `NSViewController` — and that lives in `#if os(macOS)` blocks in one
+      # file rather than a second copy of the plugin, or the symlink the
+      # alternative layout would need.
       ios:
         pluginClass: FlutterStoreListingPlugin
+        sharedDarwinSource: true
+      # New in 2.1. 2.0 gave macOS the store listing in Dart, through
+      # `url_launcher`, and declared no macOS platform because there was no
+      # native code to register. The StoreKit prompt is native, so now there is.
+      macos:
+        pluginClass: FlutterStoreListingPlugin
+        sharedDarwinSource: true
 

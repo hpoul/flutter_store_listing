@@ -49,9 +49,9 @@ abstract interface class StoreIdentity {
 /// [FlutterStoreListing.configure] once, so that the proprietary Play
 /// dependency stays out of this package and out of F-Droid builds.
 ///
-/// The iOS StoreKit prompt is an implementation of this interface too, not a
-/// hardcoded channel call, so there is exactly one contract to honour and the
-/// iOS path is reachable from a test.
+/// The StoreKit prompt — iOS, and macOS as of 2.1 — is an implementation of
+/// this interface too, not a hardcoded channel call, so there is exactly one
+/// contract to honour and the Apple path is reachable from a test.
 abstract interface class InAppReviewPrompt {
   /// Whether a prompt can be shown right now.
   ///
@@ -96,6 +96,14 @@ enum InAppReviewRequest {
   /// The caller's [ReviewFallback] **does not run** for this. The user did not
   /// ask to leave the app, and sending them to the store because the app was
   /// still waking up is worse than doing nothing. Ask again later.
+  ///
+  /// **macOS does not report this**, although it has a condition that looks
+  /// like it: no visible window to present into. That one is not transient —
+  /// a Mac app with no window need never grow one — and the macOS fallback
+  /// opens the Mac App Store, a separate process that needs no window in the
+  /// calling app. So it answers [unavailable] instead, and the fallback runs.
+  /// "Transient" is the whole content of this value; a condition that merely
+  /// resembles it does not belong here.
   notNow,
 
   /// This prompt cannot show anything: the platform has none, or the

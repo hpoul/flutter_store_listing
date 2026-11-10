@@ -10,7 +10,7 @@ analyzer:
     todo: ignore
   exclude:
     - build/**
-    - ios/**
+    - darwin/**
     - android/**
   language:
     strict-casts: true

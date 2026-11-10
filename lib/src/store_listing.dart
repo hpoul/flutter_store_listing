@@ -213,15 +213,21 @@ class FlutterStoreListing {
 
   /// Whether this platform can show an in-app review prompt at all.
   ///
-  /// True on iOS, and on any platform where an [InAppReviewPrompt] has been
-  /// configured. Whether one is available *right now* is resolved when you
-  /// call [requestReview], and reported as
+  /// True on iOS and macOS, and on any platform where an [InAppReviewPrompt]
+  /// has been configured. Whether one is available *right now* is resolved when
+  /// you call [requestReview], and reported as
   /// [StoreListingOutcome.inAppReviewUnavailable].
+  ///
+  /// macOS joined in 2.1. The answer comes from
+  /// [StoreKitInAppReview.supportsPlatform] rather than from a comparison
+  /// written out here, because this getter used to carry its own
+  /// `platform == StorePlatform.iOS` — so when the prompt itself learned about
+  /// macOS, this went on reporting false and every test still passed.
   bool get isInAppReviewSupported {
     if ((_inAppReview ?? _configuredInAppReview) != null) {
       return true;
     }
-    return _effectivePlatform == StorePlatform.iOS;
+    return StoreKitInAppReview.supportsPlatform(_effectivePlatform);
   }
 
   /// Asks for a review: the in-app prompt where available, otherwise
