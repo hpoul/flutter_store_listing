@@ -1456,8 +1456,19 @@ registrant registers `FlutterStoreListingPlugin` on macOS, and the example
 app — whose "Request review (native only)" button is gated on
 `isInAppReviewSupported` — now renders that button on macOS where 2.0 hid it.
 
-**Not verified: that StoreKit draws a dialog.** It never reports back, it is
-rate-limited per user and per app version, and a locally built Mac app is not
-an App Store installation, so the absence of a visible prompt would mean
-nothing either way. `inAppReviewRequested` means the request reached the OS,
-which is all this package has ever claimed and all it can observe.
+Pressing that button with `ReviewFallback.none`, so that nothing could stand
+in for the native path, reported `inAppReviewRequested`.
+
+**And StoreKit drew the dialog** — *"Enjoying flutter_store_listing_example?
+Click a star to rate it on the App Store"*, five stars and a *Not Now*, over
+the app's own window. This paragraph predicted the opposite before anyone
+pressed the button: it said a locally built Mac app is not an App Store
+installation, so an absent prompt would prove nothing. The reasoning was
+sound and the premise was simply untested — a debug build signed to run
+locally gets the dialog.
+
+**Still not verified, and not verifiable: that any particular user sees it.**
+StoreKit rate-limits per user and per app version and never reports back, so
+`inAppReviewRequested` still means the request reached the OS and nothing
+more. What changed is that the macOS path has now been watched working end to
+end rather than inferred from a return value.
