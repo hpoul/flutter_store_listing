@@ -13,6 +13,25 @@ Supports both Swift Package Manager and CocoaPods.
 | --- | --- | --- |
 | iOS | ✅ `apps.apple.com` | ✅ StoreKit |
 | Android | ✅ Play Store app, else browser | ❌ see below |
+| macOS | ✅ `apps.apple.com` | ❌ not yet |
+| web, Windows, Linux | ❌ `unsupportedPlatform` | ❌ `unsupportedPlatform` |
+
+macOS gained the listing in 2.0. Up to 1.4.0 it fell into the Android branch
+and opened a Google Play web page for a macOS bundle id. Its in-app prompt
+needs a view controller rather than a window scene and is deferred; when it
+arrives, `isInAppReviewSupported` going false→true on macOS breaks nobody.
+
+**The macOS listing is Dart-only, and `pubspec.yaml` declares no macOS
+platform**, so pub.dev badges this package Android and iOS. That is not an
+oversight: the macOS path builds an `apps.apple.com` URL and hands it to
+`url_launcher`, which declares macOS itself, so there is no native
+implementation here to register. Declaring the platform means shipping a
+`macos/` directory, and that lands with the native in-app prompt above rather
+than before it. Nothing to do on your side — add the dependency and the macOS
+listing works.
+
+Web and desktop report `unsupportedPlatform` rather than silently doing
+something wrong, which is the other half of the same fix.
 
 On Android the listing opens the way Google's own [Linking to Google
 Play](https://developer.android.com/distribute/marketing-tools/linking-to-google-play)
@@ -52,26 +71,86 @@ The Android side has no Gradle dependencies at all. Play's in-app review API
 is deliberately left out of this package to keep it free of proprietary
 dependencies, which would otherwise end up in F-Droid builds.
 
-`launchRequestReview(onlyNative: true)` therefore does nothing on Android.
-Without `onlyNative` it opens the Play store listing instead.
+So `requestReview(fallback: ReviewFallback.none)` reports
+`inAppReviewUnavailable` on Android unless you configure an
+`InAppReviewPrompt`. With a fallback — the default — it opens the Play listing
+instead.
 
 StoreKit decides whether the iOS prompt is actually shown — it is rate-limited
-per user and per app version, and it never reports back either way.
+per user and per app version, and it never reports back either way. A
+`StoreListingOutcome.inAppReviewRequested` means the request reached the OS,
+not that anything appeared on screen.
+
+**The fallback runs when there is no prompt, not when there is one that cannot
+be shown yet.** iOS needs a foreground-active window scene to present into,
+and there is none during the launch transition, while a system alert is up, or
+for a visible but unfocused iPad window. That reports
+`inAppReviewNotNow` and runs **no** fallback: the user never asked to leave the
+app, so sending them to the App Store because it was still waking up would be
+worse than doing nothing. If you ask for a review from a post-frame callback at
+startup, expect this outcome sometimes and ask again later.
 
 # Usage
 
-see [API Documentation for details](https://pub.dev/documentation/flutter_store_listing/latest/flutter_store_listing/FlutterStoreListing-class.html):
-https://pub.dev/documentation/flutter_store_listing/latest/flutter_store_listing/FlutterStoreListing-class.html
+See the [API documentation](https://pub.dev/documentation/flutter_store_listing/latest/flutter_store_listing/FlutterStoreListing-class.html)
+for details.
+
+Configure the shared instance once, in `main()`:
 
 ```dart
 void main() {
-  // If available, display the review request dialog.
-  // Does nothing when not on iOS.
-  FlutterStoreListing().launchRequestReview(onlyNative: true);
-
-  // Use URL Launcher to open play store / itunes store listing for review.
-  FlutterStoreListing().launchStoreListing();
+  FlutterStoreListing.configure(
+    // The numeric App Store id: for https://apps.apple.com/app/id1479297675
+    // it is 1479297675. There is no runtime lookup, so Apple platforms need
+    // this. Android resolves its own package name.
+    appStoreId: '1479297675',
+    // Only if your Mac app has its own SKU. Under universal purchase the
+    // appStoreId above is already correct.
+    macAppStoreId: '1478552452',
+  );
+  runApp(const MyApp());
 }
+```
+
+Then ask for a review, or open the listing:
+
+```dart
+final listing = FlutterStoreListing.instance;
+
+// The in-app prompt where there is one, otherwise the write-a-review page.
+final outcome = await listing.requestReview();
+
+// Or just the listing.
+await listing.openStoreListing();
+
+// Every call reports what happened, rather than a bool that cannot tell
+// "no app store here" from "the launcher refused".
+switch (outcome) {
+  case StoreListingOutcome.inAppReviewRequested:
+  case StoreListingOutcome.storeListingOpened:
+    // outcome.isSuccess is true for exactly these two.
+    break;
+  case StoreListingOutcome.inAppReviewNotNow:
+    // A prompt exists but could not be shown this instant — on iOS, no
+    // foreground-active scene. Nothing happened and no fallback ran, on
+    // purpose. This is the one failure worth retrying unchanged.
+    break;
+  default:
+    // unsupportedPlatform, inAppReviewUnavailable, storeIdUnavailable or
+    // launchRefused. New values may be added in a minor release, so keep a
+    // `default` here — or a wildcard `_` case in a switch *expression*, where
+    // `default` is not allowed.
+    break;
+}
+```
+
+To gate UI on whether there is anything to open, both capability getters are
+synchronous and usable directly in `build()`:
+
+```dart
+if (FlutterStoreListing.instance.isStoreListingSupported) ...[
+  const RateThisAppTile(),
+],
 ```
 
 # Notes

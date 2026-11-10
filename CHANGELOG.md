@@ -1,3 +1,138 @@
+## 2.0.0
+
+**Breaking: every method returns a `StoreListingOutcome` instead of a `bool`,
+the platform is a value rather than a compile-time global, and the iTunes
+lookup is gone.** The design and its reasoning are in
+[`doc/api-2.0-design.md`](doc/api-2.0-design.md).
+
+### What this fixes
+
+* **macOS, Windows, Linux and web used to take the Android branch.** A macOS
+  build opened a Google Play web page for a macOS bundle id and returned
+  `true`. macOS now opens its own App Store listing; the rest report
+  `unsupportedPlatform`.
+* **A bare `bool` could not tell "no app store here" from "could not resolve
+  the id" from "the launcher refused"** — or, when the id resolved to the
+  string `"null"`, from success. `StoreListingOutcome` distinguishes all of
+  them, and `outcome.isSuccess` is there when you do not care which.
+* **`getIosAppId()` did a network call to discover a build-time constant.** It
+  hit the iTunes `/lookup` endpoint on every launch, passed no `country` so it
+  searched the US storefront only — an app not published in the US failed
+  permanently, not just offline — and `results[0]['trackId'].toString()`
+  yielded the literal string `"null"` on a missing field, which then launched
+  `/idnull`. Deleted. `appStoreId` is a configuration value, and the `http`
+  dependency is gone from every consumer's tree with it.
+* **Nothing was testable.** The platform came from a conditional import, and
+  the iOS prompt was a `static const MethodChannel` with no seam, so neither
+  could be faked. Both are injectable now and the suite covers every outcome.
+* **iOS could claim a prompt it had not shown.** The Swift side fell back to an
+  arbitrary member of `connectedScenes` when none was foreground-active, then
+  reported success. It now says so, and you get the new
+  `inAppReviewNotNow` — **no fallback runs**, because that state is transient
+  and the user never asked to leave the app. An app requesting a review from a
+  post-frame callback at startup sees this sometimes; ask again later.
+
+### Migration
+
+| 1.4.0 | 2.0.0 |
+|---|---|
+| `FlutterStoreListing()` | `FlutterStoreListing.instance` — **there is no unnamed constructor**, deliberately |
+| `FlutterStoreListing.customize(…)` | `FlutterStoreListing.custom(…)` |
+| `forceIosAppId` | `appStoreId`, a `configure()`/`custom()` argument; no public field |
+| `forceAndroidPackageName` | `androidPackageName`, likewise argument-only |
+| `isSupported()` | `isStoreListingSupported` — synchronous |
+| `isSupportedNativeRequestReview()` | `isInAppReviewSupported` — synchronous |
+| `launchStoreListing({iosWriteReview})` | `openStoreListing({writeReview})` — **default flipped to false** |
+| `launchRequestReview({onlyNative})` | `requestReview({fallback})` |
+| `getIosAppId()`, `getAndroidPackageName()` | `storeId()` |
+| `getIosStoreListing()`, `getAndroidStoreListing()` | `appStoreUri()`, `playStoreWebUri()` — static, returning `Uri` |
+| `urlCanLaunch`, `defaultUrlCanLaunch` | removed; unused since 1.4.0 |
+| `urlLaunch`, `defaultUrlLaunch` | the `StoreListingLauncher` seam |
+| `playStorePackageName` | removed; the default launcher is the only thing that needed it |
+| — | `configure()`, `storeListingUri()`, `StorePlatform`, `ReviewFallback` |
+
+Most of that is a compile error if you miss it, which is why the unnamed
+constructor was removed rather than kept as a generative one: it would have
+gone on compiling while quietly returning an instance `configure()` never
+touched.
+
+**Two changes are silent, so check them.**
+
+1. **Configure `appStoreId`, or Apple platforms report `storeIdUnavailable`.**
+   The iTunes lookup that used to find it is gone. Debug builds assert; release
+   builds report the outcome, because an app may legitimately run unconfigured.
+   Verify the id before you ship.
+2. **Desktop and web flip from `true` to false.** A call site that branched on
+   the old `bool` sees `isSuccess == false` where it used to see success after
+   opening a Google Play page. That is the first bug above being fixed, but no
+   compiler will point at it.
+
+```dart
+// Before
+FlutterStoreListing().launchRequestReview(onlyNative: true);
+await FlutterStoreListing().launchStoreListing();
+
+// After — note writeReview: true to keep 1.4.0's behaviour, since the
+// default is now the plain listing.
+FlutterStoreListing.configure(appStoreId: '1479297675');
+await FlutterStoreListing.instance
+    .requestReview(fallback: ReviewFallback.none);
+await FlutterStoreListing.instance.openStoreListing(writeReview: true);
+```
+
+### Also
+
+* **`StoreListingOutcome` may gain values in a minor release**, which is a
+  breaking change by Dart's rules and so is said here rather than implied to be
+  free. Keep a `default` clause in a switch statement, or a wildcard `_` case
+  in a switch expression — `default` is a compile-time error in an expression.
+  `ReviewFallback`, `StorePlatform` and `InAppReviewRequest` are closed.
+* **The review fallback runs when there is no prompt, not when there is one
+  that cannot be shown yet.** `InAppReviewPrompt.requestReview()` returns
+  `InAppReviewRequest` rather than a `bool` so those two are distinguishable:
+  `unavailable` runs your `ReviewFallback`, `notNow` reports
+  `inAppReviewNotNow` and does nothing. A `bool` could not carry it, because
+  `isAvailable()` answers from the platform alone on iOS and so reads `true`
+  both for an inactive scene and for a plugin that never registered — and those
+  want opposite handling. If you implement the seam, note that
+  **`unavailable` is the value for a failure**, which is what `false` used to
+  mean.
+* **`InAppReviewPrompt` is the Android in-app review seam.** A separate package
+  can implement it against Play's review API and you wire it in with
+  `configure(inAppReview: …)`, so the proprietary Play dependency stays out of
+  this package and out of F-Droid builds. No such package is published yet.
+* **A prompt passed to `configure()` is *preferred*, not substituted.**
+  `configure()` is global and a prompt is usually platform-specific, so the one
+  call above would otherwise have replaced StoreKit on iOS for every app that
+  ships on both stores — and a Play-backed prompt reports itself unavailable on
+  iOS, so the user who should have seen the native rating dialog got the App
+  Store write-review page instead. The configured prompt is asked first on
+  every platform and this package's own prompt stays behind it
+  (`PreferredInAppReview`). A prompt passed to `custom()` still wins outright.
+* **The bundled implementations are exported**
+  (`DefaultStoreListingLauncher`, `PackageInfoStoreIdentity`,
+  `StoreKitInAppReview`, `PreferredInAppReview`), so you can decorate the
+  default behaviour — log a launch, confirm before leaving the app — instead of
+  reimplementing the Android store intent to get at it.
+* **macOS support is Dart-only and `pubspec.yaml` declares no macOS platform**,
+  so pub.dev badges this package Android and iOS. The macOS path builds an
+  `apps.apple.com` URL and hands it to `url_launcher`, so there is no native
+  implementation here to register; declaring the platform means shipping a
+  `macos/` directory, which lands with the native macOS prompt. The listing
+  works on macOS with no extra step on your side.
+* `configure()` **merges**: an argument left out keeps its current value, so an
+  app's own call and a review package's compose rather than overwriting.
+* The shared instance reads its configuration **per call**, so a reference
+  captured in a `State` field initialiser before `main()` configures it still
+  works.
+* The Android Kotlin implementation is unchanged from 1.4.0 apart from the
+  `no_activity` comment, which described the Dart retry this release removes.
+  The Dart side now distinguishes `MissingPluginException` (fall back to
+  `url_launcher`) from a `PlatformException` such as `no_activity` (do not —
+  `url_launcher` is `ActivityAware` too and detached in the same window), and a
+  reply it cannot read — a wrong type included — falls back rather than
+  throwing out of a method that promises an outcome.
+
 ## 1.4.0
 
 **Android gets a native implementation, and the `market://` probe is gone.**

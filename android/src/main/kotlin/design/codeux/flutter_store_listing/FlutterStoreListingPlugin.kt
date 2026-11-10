@@ -98,11 +98,12 @@ class FlutterStoreListingPlugin :
             //
             // Falling back to `url_launcher` cannot rescue it: that plugin is
             // `ActivityAware` too and is detached in the same window, so its
-            // own `ensureActivity` throws. The Dart side does still attempt it
-            // — it catches `PlatformException` wholesale and retries — so this
-            // reaches the caller as `false` by way of that second failure
-            // rather than directly. Telling the two exceptions apart, and so
-            // skipping the pointless retry, is a 2.0 change.
+            // own `ensureActivity` throws. So as of 2.0 the Dart side does not
+            // try. It tells `MissingPluginException` (fall back) apart from a
+            // `PlatformException` like this one (do not), and reports
+            // `launchRefused` directly rather than reaching the same answer by
+            // way of a second failure. Up to 1.4.0 it caught
+            // `PlatformException` wholesale and retried.
             result.error(
                 ERROR_NO_ACTIVITY,
                 "No activity is attached; cannot open a store listing.",
