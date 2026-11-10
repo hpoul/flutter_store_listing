@@ -605,7 +605,9 @@ native code, and `StorePlatform.macOS` is already in the enum. It also fixes a
 live bug in AuthPass, which today opens a Google Play web page on macOS. **In
 for 2.0.**
 
-**One unverified premise here is load-bearing.** That `url_launcher` hands that
+**One unverified premise here is load-bearing.** *(Checked after 2.0 merged;
+it holds — see the three paragraphs below, kept separate so the decision reads
+as it was made.)* That `url_launcher` hands that
 URL to the Mac App Store *app* is not confirmed from Apple documentation —
 `url_launcher_macos` opens through `NSWorkspace`, which goes to the default
 https handler, i.e. a browser, unless the store app claims the domain. Check it
@@ -613,6 +615,31 @@ on a Mac before implementing. If it opens a browser, macOS support is still
 worth shipping — a web listing beats a Google Play page for a Mac bundle id —
 but "nearly free" and one `appStoreUri()` serving both Apple platforms are what
 need revisiting, not the decision itself.
+
+**Verified on 2026-11-10, after 2.0 merged — macOS 27.0.1, Flutter 3.47.9.**
+The premise holds: it opens the Mac App Store *app*. The example app's
+`requestReview()` reported `storeListingOpened` and the store came forward
+with the **Write a Review** sheet over the *Mac* listing for `id1478552452` —
+not a browser, and not the iOS SKU. So "nearly free" and one `appStoreUri()`
+serving both Apple platforms stand, and nothing above needs revisiting.
+
+**But it wins as a universal link, not as the default handler, and that
+distinction has teeth.** `NSWorkspace`'s `urlForApplication(toOpen:)` — the
+call behind `canLaunchUrl` — answers **Google Chrome** for the very same URL
+on the same machine. The paragraph above was right about the mechanism and
+wrong only about the conclusion: universal-link routing inside
+`NSWorkspace.open` overrides the scheme's default handler. Anyone who tries to
+re-confirm this with `canLaunchUrl` will be told "a browser" and conclude the
+opposite. §2.6's choice not to gate on `canLaunchUrl` is load-bearing on macOS
+for a reason it did not know it had.
+
+**The sandbox is why this needed a Flutter app and not just a probe.** A
+command-line tool calling `NSWorkspace.open` is unsandboxed; a Flutter macOS
+app ships with `com.apple.security.app-sandbox`, and brokered LaunchServices
+routing was the plausible way for this to differ in the real app. It does not:
+the sandboxed example routes to the store app exactly as the probe did.
+`example/macos` exists now so this stays reproducible, and 2.1's native prompt
+needs a macOS example regardless.
 
 The **native prompt** needs a second SPM target, a podspec platform, an
 `NSViewController` instead of a `UIWindowScene`, and a macOS example.
@@ -1139,7 +1166,11 @@ them do not.
 * **That `url_launcher` hands `apps.apple.com` to the Mac App Store app** (§3).
   `NSWorkspace` goes to the default https handler. This is load-bearing for
   "nearly free" and for one `appStoreUri()` serving both Apple platforms, so it
-  needs a Mac before implementing — though not before deciding.
+  needs a Mac before implementing — though not before deciding. **Verified
+  2026-11-10 and it holds** (§3): the store app claims the domain, so
+  `NSWorkspace.open` routes there by universal link even though
+  `urlForApplication(toOpen:)` names a browser. It shipped unverified, which
+  was the right call — but it shipped *right*, and that is luck, not method.
 * **That the https URL opens the App Store app on iOS** (§7) — withdrawn, since
   nothing rests on it.
 * **That Play's `ReviewManager` throws synchronously** (§2.5) — the contract
