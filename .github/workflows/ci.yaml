@@ -99,3 +99,26 @@ jobs:
         run: |
           flutter pub get
           flutter build ios --no-codesign --debug
+
+  # Separate from the iOS job even though 2.1 moved both platforms into one
+  # `darwin/` source tree — because of that, in fact. The macOS half of the
+  # review prompt lives behind `#if os(macOS)`, which an iOS build never
+  # compiles, so an iOS-only CI would have gone on passing while the macOS
+  # branch failed to build at all.
+  build-example-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # No --no-codesign equivalent is needed: the macOS template signs to run
+      # locally, which needs no key.
+      - name: Build example (macOS)
+        working-directory: example
+        run: |
+          flutter pub get
+          flutter build macos --debug

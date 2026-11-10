@@ -228,12 +228,37 @@ void main() {
       );
     });
 
-    test('in-app review is iOS-only by default', () {
+    test('in-app review is Apple-only by default', () {
       expect(
         _subject(platform: StorePlatform.iOS).isInAppReviewSupported,
         isTrue,
       );
+      // New in 2.1, and the assertion that was missing: this getter kept its
+      // own `platform == StorePlatform.iOS`, so teaching the prompt about
+      // macOS left the capability getter answering false with a green suite.
+      expect(
+        _subject(platform: StorePlatform.macOS).isInAppReviewSupported,
+        isTrue,
+      );
       expect(_subject().isInAppReviewSupported, isFalse);
+      expect(
+        _subject(platform: StorePlatform.unsupported).isInAppReviewSupported,
+        isFalse,
+      );
+    });
+
+    test('the getter and the built-in prompt cannot drift apart', () async {
+      // The structural half of that fix. The getter is synchronous and
+      // `InAppReviewPrompt.isAvailable` is not, so the two cannot be one
+      // member; this holds them to the same answer on every platform,
+      // including a value added after this was written.
+      for (final platform in StorePlatform.values) {
+        expect(
+          _subject(platform: platform).isInAppReviewSupported,
+          await StoreKitInAppReview(platform).isAvailable(),
+          reason: 'the getter and the prompt disagree about $platform',
+        );
+      }
     });
 
     test('a configured prompt makes Android support in-app review', () {
@@ -979,20 +1004,30 @@ void main() {
 
     tearDown(() => mockNative(null));
 
-    test('is available on iOS and nowhere else', () async {
-      // The iOS prompt is behind the same interface the Play package would
+    test('is available on both Apple platforms and nowhere else', () async {
+      // The prompt is behind the same interface the Play package would
       // implement, which is what makes it reachable from a test at all — up
       // to 1.4.0 it was a static const MethodChannel with no seam.
       expect(
         await const StoreKitInAppReview(StorePlatform.iOS).isAvailable(),
         isTrue,
       );
+      // False until 2.1, which added the native macOS implementation. The
+      // widening is deliberately not hidden behind a flag: a caller gating UI
+      // on `isInAppReviewSupported` gains a working prompt, and one that was
+      // relying on the fallback gets the native dialog instead of a web page.
       expect(
         await const StoreKitInAppReview(StorePlatform.macOS).isAvailable(),
-        isFalse,
+        isTrue,
       );
       expect(
         await const StoreKitInAppReview(StorePlatform.android).isAvailable(),
+        isFalse,
+      );
+      expect(
+        await const StoreKitInAppReview(
+          StorePlatform.unsupported,
+        ).isAvailable(),
         isFalse,
       );
     });
@@ -1012,6 +1047,32 @@ void main() {
       mockNative((call) async => 'noActiveScene');
       expect(
         await const StoreKitInAppReview(StorePlatform.iOS).requestReview(),
+        InAppReviewRequest.notNow,
+      );
+    });
+
+    test('maps macOS\'s missing presenter to notNow as well', () async {
+      // macOS answers `noPresenter` rather than `noActiveScene`: it has no
+      // scenes, and `AppStore.requestReview(in:)` takes an `NSViewController`
+      // there. Same meaning, so the same outcome and the same suppressed
+      // fallback.
+      mockNative((call) async => 'noPresenter');
+      expect(
+        await const StoreKitInAppReview(StorePlatform.macOS).requestReview(),
+        InAppReviewRequest.notNow,
+      );
+    });
+
+    test('still reads the iOS spelling after a host is not rebuilt', () async {
+      // The reason 2.1 added a value instead of renaming one. Dart always
+      // ships new; the compiled plugin in the host app does not, so an older
+      // native side goes on answering `noActiveScene` to this code. If that
+      // stopped mapping to `notNow`, the transient condition would read as an
+      // unreadable reply and run the fallback — sending the user to the store
+      // during a launch transition, which is the exact bug 2.0 fixed.
+      mockNative((call) async => 'noActiveScene');
+      expect(
+        await const StoreKitInAppReview(StorePlatform.macOS).requestReview(),
         InAppReviewRequest.notNow,
       );
     });

@@ -1,3 +1,44 @@
+## 2.1.0
+
+**The StoreKit review prompt now works on macOS, and the package declares the
+macOS platform.** 2.0 gave macOS the store listing in Dart and deferred the
+prompt, on the grounds that the native side needs a view controller rather
+than a window scene. That premise was right, and the SDK says so exactly:
+`AppStore.requestReview(in:)` takes a `UIWindowScene` on iOS and an
+`NSViewController` on macOS.
+
+* **`isInAppReviewSupported` answers true on macOS**, where it answered false.
+  A widening, which is what makes this a minor release: UI that gated on the
+  getter gains a working prompt, and a caller that was relying on
+  `ReviewFallback.writeReviewPage` gets the native dialog instead of a web
+  page. If you want the old behaviour on macOS, pass
+  `ReviewFallback.writeReviewPage` to `openStoreListing` rather than
+  `requestReview`.
+* **One Swift source tree for both Apple platforms.** `ios/` is now `darwin/`,
+  with `sharedDarwinSource: true` on both platform entries, one podspec and one
+  `Package.swift`. Nothing changes for consumers — Flutter resolves the new
+  path itself, under CocoaPods and Swift Package Manager alike — and the two
+  platforms differ in a single `#if os(macOS)`.
+* **macOS 12 is still supported.** The modern API needs macOS 13; below that
+  the prompt falls back to the deprecated no-argument
+  `SKStoreReviewController.requestReview()`, rather than the package raising
+  Flutter's own floor for one call.
+* **A new `noPresenter` reply maps to `inAppReviewNotNow`**, macOS's version of
+  iOS's `noActiveScene`: no view controller, so no window to present in, so no
+  fallback. The iOS spelling is still read rather than renamed, because
+  upgrading this package without rebuilding the host leaves an older compiled
+  plugin answering newer Dart code.
+
+### One bug found on the way
+
+**`isInAppReviewSupported` kept its own copy of the platform list.** The getter
+is synchronous and `InAppReviewPrompt.isAvailable()` is not, so the same fact
+was written twice — and teaching the prompt about macOS left the getter saying
+`platform == StorePlatform.iOS` with the whole suite still green, because
+nothing compared the two. The getter now asks
+`StoreKitInAppReview.supportsPlatform`, and a test holds them to the same
+answer for every `StorePlatform` value, including ones added later.
+
 ## 2.0.0
 
 **Breaking: every method returns a `StoreListingOutcome` instead of a `bool`,

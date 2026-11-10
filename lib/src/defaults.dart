@@ -181,14 +181,39 @@ class StoreKitInAppReview implements InAppReviewPrompt {
 
   final StorePlatform platform;
 
-  /// True on iOS alone.
+  /// True on iOS and macOS.
   ///
   /// There is no channel round trip to learn this: the native side answers
-  /// unconditionally on every iOS version this package supports, so asking it
-  /// only cost an `await`. macOS has no prompt here yet — the native side
-  /// needs a view controller rather than a window scene, which is 2.1 work.
+  /// unconditionally on every version of either platform this package
+  /// supports, so asking it only cost an `await`.
+  ///
+  /// macOS answers true as of 2.1, and 2.0 had already named the reason it
+  /// could not: the native side needs a view controller rather than a window
+  /// scene. The SDK turns out to say exactly that —
+  /// `AppStore.requestReview(in:)` takes a `UIWindowScene` on iOS and an
+  /// `NSViewController` on macOS. False→true is a widening, so no caller that
+  /// gated UI on this breaks.
+  ///
   @override
-  Future<bool> isAvailable() async => platform == StorePlatform.iOS;
+  Future<bool> isAvailable() async => supportsPlatform(platform);
+
+  /// Whether this package ships a StoreKit prompt for [platform].
+  ///
+  /// Static and synchronous because [FlutterStoreListing.isInAppReviewSupported]
+  /// is a synchronous getter and used to answer this with its own
+  /// `platform == StorePlatform.iOS`. Two places encoded one fact, and 2.1
+  /// found out the hard way: widening [isAvailable] to macOS left the getter
+  /// still saying iOS, and the whole suite stayed green, because no test
+  /// compared them. One source of truth, and a test below that holds the two
+  /// together.
+  ///
+  /// A `switch` rather than two comparisons, because [StorePlatform] is closed
+  /// and this is the pattern the package recommends to its own callers: if a
+  /// value is ever added, this is a compile error instead of a silent `false`.
+  static bool supportsPlatform(StorePlatform platform) => switch (platform) {
+    StorePlatform.iOS || StorePlatform.macOS => true,
+    StorePlatform.android || StorePlatform.unsupported => false,
+  };
 
   /// The native side answers with a status string rather than a bool, so that
   /// "StoreKit took it" and "there was no scene to present in" are two
@@ -203,10 +228,23 @@ class StoreKitInAppReview implements InAppReviewPrompt {
       switch (result) {
         case 'requested':
           return InAppReviewRequest.requested;
+        // Two spellings, one meaning: there was nothing to present the prompt
+        // in. iOS says `noActiveScene` (no foreground-active window scene),
+        // macOS says `noPresenter` (no view controller, so no window).
+        //
+        // The iOS spelling is kept rather than unified under the neutral name,
+        // because this branch has to keep reading it either way: upgrading the
+        // package without rebuilding the host leaves an older compiled plugin
+        // answering this newer Dart code. Accepting a value only newer native
+        // code sends is safe in that direction; renaming one would make a
+        // transient condition look like an unreadable reply and run the
+        // fallback.
         case 'noActiveScene':
+        case 'noPresenter':
           _logger.info(
-            'No foreground-active scene, so StoreKit was not asked. Nothing '
-            'was shown and no fallback ran; ask again later.',
+            'Nothing to present a review prompt in ($result), so StoreKit was '
+            'not asked. Nothing was shown and no fallback ran; ask again '
+            'later.',
           );
           return InAppReviewRequest.notNow;
       }

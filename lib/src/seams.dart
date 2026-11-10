@@ -49,9 +49,9 @@ abstract interface class StoreIdentity {
 /// [FlutterStoreListing.configure] once, so that the proprietary Play
 /// dependency stays out of this package and out of F-Droid builds.
 ///
-/// The iOS StoreKit prompt is an implementation of this interface too, not a
-/// hardcoded channel call, so there is exactly one contract to honour and the
-/// iOS path is reachable from a test.
+/// The StoreKit prompt — iOS, and macOS as of 2.1 — is an implementation of
+/// this interface too, not a hardcoded channel call, so there is exactly one
+/// contract to honour and the Apple path is reachable from a test.
 abstract interface class InAppReviewPrompt {
   /// Whether a prompt can be shown right now.
   ///
@@ -91,11 +91,19 @@ enum InAppReviewRequest {
   /// Nothing was shown, and nothing can be until something outside this
   /// package's view changes — on iOS, no window scene was foreground-active,
   /// which is true during the launch transition, while a system alert is up,
-  /// and for a visible but unfocused iPad window.
+  /// and for a visible but unfocused iPad window. On macOS, the plugin's
+  /// registrar reported no view controller, which means the app has no window
+  /// to present into.
   ///
   /// The caller's [ReviewFallback] **does not run** for this. The user did not
   /// ask to leave the app, and sending them to the store because the app was
   /// still waking up is worse than doing nothing. Ask again later.
+  ///
+  /// The macOS case is rarer, and need not be transient: a host running
+  /// genuinely headless never grows a window, so it reports this every time.
+  /// Suppressing the fallback is still the right answer there. Treating a
+  /// windowless app as "no prompt on this platform" would substitute a store
+  /// page in the one situation where there is also nowhere to show it.
   notNow,
 
   /// This prompt cannot show anything: the platform has none, or the

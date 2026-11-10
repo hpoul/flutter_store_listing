@@ -647,6 +647,25 @@ Separable, and adding it later is non-breaking —
 `isInAppReviewSupported` going false→true on macOS in 2.1 breaks nobody.
 **Deferred.**
 
+**Done in 2.1, and the list above was right about the hard part.**
+`AppStore.requestReview(in:)` takes a `UIWindowScene` on iOS and an
+`NSViewController` on macOS — the macOS SDK's own `StoreKit.swiftinterface`
+states exactly that, so the reason given here for deferring was the real one.
+The macOS example built for the verification above is what it presents into.
+
+Two items were cheaper than estimated. The "second SPM target" is not a second
+target at all: `sharedDarwinSource: true` points both platform entries at one
+`darwin/` tree, so `ios/` was renamed and the two platforms now differ in a
+single `#if os(macOS)`. And the macOS 12 floor is kept rather than raised —
+the modern API needs macOS 13, so below that the prompt falls back to the
+no-argument `SKStoreReviewController.requestReview()`, exactly as iOS 15 falls
+back to the scene-taking one.
+
+One cost this did not foresee, and it was not in the native code at all:
+`isInAppReviewSupported` kept its own copy of the platform list, so teaching
+the prompt about macOS left the capability getter still saying iOS, with the
+whole suite green. §12 records it.
+
 Note that macOS is not merely "iOS with a different URL host": AuthPass has
 separate iOS and Mac SKUs (`id1479297675` vs `id1478552452`), so supporting the
 listing at all requires `macAppStoreId` from §2.4 rather than reusing
@@ -1296,6 +1315,13 @@ directory, which belongs with the native macOS prompt in 2.1. The runtime
 behaviour is fine — the macOS path is `url_launcher` only — so this is a
 documentation fix, and README and CHANGELOG now say so.
 
+**Resolved in 2.1**, and the conclusion held: the platform was declared once
+there was native code to register, which is the prompt. The one correction is
+the shape — `sharedDarwinSource: true` means the `macos/` directory this
+paragraph anticipated is a shared `darwin/` one, and `ios/` moved into it
+rather than a second tree appearing beside it. pub.dev now badges macOS
+because the package really does implement it.
+
 ### Not taken
 
 * **That a transient `.foregroundInactive` scene should not run the fallback**
@@ -1367,3 +1393,71 @@ The seam is also the honest shape: the first implementation outside this
 package wraps Play's review flow, which distinguishes "the quota is exhausted
 right now" from "Play is not installed" — the same distinction, arrived at from
 the other platform.
+
+## 12. 2.1 — the macOS review prompt
+
+§3 deferred this with a list of what it would cost, and the list was accurate
+about the hard part: `AppStore.requestReview(in:)` takes a `UIWindowScene` on
+iOS and an `NSViewController` on macOS. That is not inferred — it is what the
+macOS SDK's `StoreKit.swiftinterface` declares, and it is the whole reason the
+prompt could not simply follow the listing in 2.0.
+
+### What shipped
+
+* **One Darwin source tree.** `sharedDarwinSource: true` on both Apple
+  platform entries, so `ios/` became `darwin/` and both resolve one podspec,
+  one `Package.swift` and one Swift file. The estimate said "a second SPM
+  target"; there is none. The platforms differ in a single `#if os(macOS)`,
+  which is also where both halves of the difference are readable at once.
+* **macOS 12 is still the floor.** `AppStore.requestReview(in:)` needs macOS
+  13, so below it the prompt falls back to the no-argument
+  `SKStoreReviewController.requestReview()` — deprecated at macOS 15, and the
+  pre-scene API that has no presenter parameter at all. Structurally identical
+  to the iOS 15 fallback, down to the `@available(…, deprecated:)` on the
+  helper that keeps the warning from reaching the caller.
+* **A `noPresenter` reply**, macOS's analogue of `noActiveScene`, mapping to
+  the same `inAppReviewNotNow` and the same suppressed fallback. Added rather
+  than renamed, because Dart always ships new while the compiled plugin in a
+  host app does not: an older native side goes on answering `noActiveScene` to
+  newer Dart code, and a rename would make a transient condition read as an
+  unreadable reply and run the fallback — the exact bug 2.0 fixed.
+
+### The bug this turned up, which was not in the native code
+
+**`isInAppReviewSupported` kept its own copy of the platform list.** The
+capability getter is synchronous and `InAppReviewPrompt.isAvailable()` is not,
+so the two cannot be the same member — and the fact that this package has a
+StoreKit prompt on exactly iOS was written down in both. Widening the prompt
+to macOS left the getter returning `platform == StorePlatform.iOS`, so a macOS
+app would have reported no in-app review while the prompt behind it worked.
+
+Every test passed. 73 of them, including ones that assert the getter's value
+on three platforms and ones that assert the prompt's availability on three
+platforms — and not one that compared the two, because nothing had ever made
+them disagree.
+
+The fix is `StoreKitInAppReview.supportsPlatform`, which both now call, plus a
+test that walks `StorePlatform.values` and holds the getter and the prompt to
+the same answer. That second test is a tautology while the getter delegates,
+which is precisely what it is for: it fails the moment someone writes the
+comparison out again.
+
+**The general shape is worth naming**, because §11 has two of these already: a
+fact stated in two places stays consistent only until one of them is edited,
+and a suite that tests both places independently cannot see the drift. Tests
+of agreement are a different category from tests of value, and this package
+now has one.
+
+### Verified, and not
+
+Verified on macOS 27.0.1 with Flutter 3.47.9: the plugin compiles for
+`arm64-apple-macos12.0` from `darwin/` with no warnings, the generated
+registrant registers `FlutterStoreListingPlugin` on macOS, and the example
+app — whose "Request review (native only)" button is gated on
+`isInAppReviewSupported` — now renders that button on macOS where 2.0 hid it.
+
+**Not verified: that StoreKit draws a dialog.** It never reports back, it is
+rate-limited per user and per app version, and a locally built Mac app is not
+an App Store installation, so the absence of a visible prompt would mean
+nothing either way. `inAppReviewRequested` means the request reached the OS,
+which is all this package has ever claimed and all it can observe.
